@@ -623,6 +623,61 @@ extern "C" __global__ void gvdbScatterPointDensity (VDBInfo* gvdb, int num_pnts,
 	}
 }
 
+// TODO: implementation - currently this is a copy of the scatterdensity, but without the amp param
+extern "C" __global__ void gvdbScatterReduceLevelSet(
+	VDBInfo* gvdb, int num_pnts, float radius,
+	char* ppos, int pos_off, int pos_stride,
+	char* pclr, int clr_off, int clr_stride,
+	int* pnode, float3 ptrans, bool expand, uint* colorBuf)
+{
+    uint i = blockIdx.x * blockDim.x + threadIdx.x;
+	if ( i >= num_pnts ) return;
+	if ( pnode[i] == ID_UNDEFL ) return;		// make sure point is inside a brick
+
+	// Get particle position in brick	
+	float3 wpos = (*(float3*) (ppos + i*pos_stride + pos_off)) + ptrans;	
+	float3 vmin;
+	float w;
+	VDBNode* node = getNode ( gvdb, 0, pnode[i], &vmin );			// Get node		
+	float3 p = (wpos-vmin)/gvdb->vdel[0];
+	float3 pi = make_float3(int(p.x), int(p.y), int(p.z));
+
+	// range of pi.x,pi.y,pi.z = [0, gvdb->res0-1]
+	if ( pi.x < 0 || pi.y < 0 || pi.z < 0 || pi.x >= gvdb->res[0] || pi.y >= gvdb->res[0] || pi.z >= gvdb->res[0] ) return;
+	uint3 q = make_uint3(pi.x,pi.y,pi.z) + make_uint3( node->mValue );	
+
+	w = tex3D<float>( gvdb->volIn[0], q.x,q.y,q.z ) + distFunc(p, pi.x, pi.y,pi.z, radius) ;				surf3Dwrite ( w, gvdb->volOut[0], q.x*sizeof(float), q.y, q.z );
+
+	if ( expand ) {		
+		w = tex3D<float> (gvdb->volIn[0], q.x-1,q.y,q.z) + distFunc(p, pi.x-1, pi.y, pi.z, radius);		surf3Dwrite ( w, gvdb->volOut[0], (q.x-1)*sizeof(float), q.y, q.z );
+		w = tex3D<float> (gvdb->volIn[0], q.x+1,q.y,q.z) + distFunc(p, pi.x+1, pi.y, pi.z, radius);		surf3Dwrite ( w, gvdb->volOut[0], (q.x+1)*sizeof(float), q.y, q.z );
+		w = tex3D<float> (gvdb->volIn[0], q.x,q.y-1,q.z) + distFunc(p, pi.x, pi.y-1, pi.z, radius);		surf3Dwrite ( w, gvdb->volOut[0], q.x*sizeof(float), (q.y-1), q.z );
+		w = tex3D<float> (gvdb->volIn[0], q.x,q.y+1,q.z) + distFunc(p, pi.x, pi.y+1, pi.z, radius); 		surf3Dwrite ( w, gvdb->volOut[0], q.x*sizeof(float), (q.y+1), q.z );
+		w = tex3D<float> (gvdb->volIn[0], q.x,q.y,q.z-1) + distFunc(p, pi.x, pi.y, pi.z-1, radius);		surf3Dwrite ( w, gvdb->volOut[0], q.x*sizeof(float), q.y, (q.z-1) );
+		w = tex3D<float> (gvdb->volIn[0], q.x,q.y,q.z+1) + distFunc(p, pi.x, pi.y, pi.z+1, radius);		surf3Dwrite ( w, gvdb->volOut[0], q.x*sizeof(float), q.y, (q.z+1) );
+	}
+
+	if ( pclr != 0 ) {
+		uchar4 wclr = *(uchar4*) (pclr + i*clr_stride + clr_off );
+
+		if ( colorBuf != 0 ) {	
+			// Increment index
+			uint brickres = gvdb->res[0];
+			uint vid = (brickres * brickres * brickres * pnode[i]) + (brickres * brickres * (uint)pi.z) + (brickres * (uint)pi.y) + (uint)pi.x;
+			uint colorIdx = vid * 4;
+		
+			// Store in color in the colorbuf
+			atomicAdd(&colorBuf[colorIdx + 0], 1);
+			atomicAdd(&colorBuf[colorIdx + 1], wclr.x);
+			atomicAdd(&colorBuf[colorIdx + 2], wclr.y);
+			atomicAdd(&colorBuf[colorIdx + 3], wclr.z);
+		}
+		else {
+		 	surf3Dwrite(wclr, gvdb->volOut[3], q.x*sizeof(uchar4), q.y, q.z);
+		}
+	}
+}
+
 extern "C" __global__ void gvdbAddSupportVoxel (VDBInfo* gvdb, int num_pnts,  float radius, float offset, float amp,
 												char* ppos, int pos_off, int pos_stride, 
 												char* pdir, int dir_off, int dir_stride, 

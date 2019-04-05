@@ -311,7 +311,9 @@ void VolumeGVDB::SetCudaDevice ( int devid, CUcontext ctx )
 	LoadFunction ( FUNC_GATHER_DENSITY,		"gvdbGatherDensity",			MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_GATHER_LEVELSET,	"gvdbGatherLevelSet",			MODL_PRIMARY, CUDA_GVDB_MODULE_PTX);
 	LoadFunction ( FUNC_GATHER_LEVELSET_FP16, "gvdbGatherLevelSet_fp16", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX);
-	
+
+	LoadFunction ( FUNC_SCATTER_REDUCE_LEVEL_SET, "gvdbScatterReduceLevelSet", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
+
 	LoadFunction ( FUNC_CALC_SUBCELL_POS,	"gvdbCalcSubcellPos",			MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_MAP_EXTRA_GVDB,		"gvdbMapExtraGVDB",			MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_SPLIT_POS,			"gvdbSplitPos",					MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
@@ -6093,6 +6095,46 @@ void VolumeGVDB::ScatterDensity ( int num_pnts, float radius, float amp, Vector3
 	POP_CTX
 }
 
+//TODO: use better format: void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, int chanDensity, int chanClr)
+void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, bool expand) {
+	uint num_voxels;
+
+	PrepareVDB();
+	PUSH_CTX
+	PERF_PUSH("ScatterReduceLevelSet");
+
+  	// TODO: BEGIN scatterreducelevelset actual implementation
+
+	int threads = 256;
+  	int pblks = int(num_pnts / threads) + 1;
+
+	void *args[13] = {
+		&cuVDBInfo,
+		&num_pnts,
+		&radius,
+		&mAux[AUX_PNTPOS].gpu,
+		&mAux[AUX_PNTPOS].subdim.x,
+		&mAux[AUX_PNTPOS].stride,
+		&mAux[AUX_PNTCLR].gpu,
+		&mAux[AUX_PNTCLR].subdim.x,
+		&mAux[AUX_PNTCLR].stride,
+		&mAux[AUX_PNODE].gpu,
+		&trans.x,
+		&expand,
+		&mAux[AUX_COLAVG].gpu
+	};
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_SCATTER_REDUCE_LEVEL_SET], pblks, 1, 1, threads, 1, 1, 0, NULL, args, NULL),
+        "VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch",
+        "FUNC_SCATTER_REDUCE_LEVEL_SET", mbDebug
+	);
+
+	// TODO: END
+
+	PERF_POP();
+	POP_CTX
+}
+
 // psrcbits / pdestbits are:
 //   1 =   byte components,  3 bytes/point 
 //   2 = ushort components   6 bytes/point
@@ -6153,7 +6195,7 @@ void VolumeGVDB::PrintPool(uchar grp, uchar lev)
 		char* pool = p->cpu;
 		nvdb::Node* nd = (nvdb::Node*) (pool + p->stride * i);
 		std::cout << "   Node " << i << ":\n";
-		//std::cout << "      mlev : " << (int)nd->mLev << std::endl;
+                //std::cout << "      mlev : " << (int)nd->mLev << std::endl;
 		//std::cout << "      mPos : " << nd->mPos.x << " " << nd->mPos.y << " " << nd->mPos.z << std::endl;
 #ifdef USE_BITMASKS	
 		if ((int)lev > 0) {
