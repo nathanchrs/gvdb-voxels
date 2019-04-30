@@ -24,6 +24,8 @@
 // - InsertPoints		- insert points into bricks
 // - SplatPoints		- splat points into bricks
 
+#include <stdio.h>
+
 #define RGBA2INT(r,g,b,a)	(				uint((r)*255.0f) +		(uint((g)*255.0f)<<8) +			(uint((b)*255.0f)<<16) +		(uint((a)*255.0f)<<24) )
 #define CLR2INT(c)			(				uint((c.x)*255.0f) +	(uint((c.y)*255.0f)<<8)	+		(uint((c.z)*255.0f)<<16) +		(uint((c.w)*255.0f)<<24 ) )
 #define INT2CLR(c)			( make_float4( float(c & 0xFF)/255.0f,	float((c>>8) & 0xFF)/255.0f,	float((c>>16) & 0xFF)/255.0f,	float((c>>24) & 0xFF)/255.0f ))
@@ -623,9 +625,40 @@ extern "C" __global__ void gvdbScatterPointDensity (VDBInfo* gvdb, int num_pnts,
 	}
 }
 
+__device__ __forceinline__ float atomicMinFloat (float * addr, float value) {
+        float old;
+        old = (value >= 0) ?  :
+             __uint_as_float(atomicMax((unsigned int *)addr, __float_as_uint(value)));
+
+        return old;
+}
+
+// TODO: handle writing to apron voxels
+inline __device__ void writeMinFloatToAtlas(VDBInfo* gvdb, int channel, int3 cellIndexInAtlas, float value) {
+	if (gvdb->use_tex_mem[channel]) {
+		// WARNING: non-atomic operation as textures doesn't support atomics - might cause write conflict
+		float prevValue = tex3D<float>(gvdb->volIn[channel], cellIndexInAtlas.x, cellIndexInAtlas.y, cellIndexInAtlas.z);
+		surf3Dwrite(min(prevValue, value), gvdb->volOut[channel], cellIndexInAtlas.x * sizeof(float), cellIndexInAtlas.y, cellIndexInAtlas.z);
+	} else {
+		int3 atlasSize = gvdb->atlas_res;
+		unsigned long int atlasIndex = cellIndexInAtlas.z * atlasSize.x * atlasSize.y +
+							cellIndexInAtlas.y * atlasSize.x + cellIndexInAtlas.x;
+		float* cell = (float*) (gvdb->atlas_dev_mem[channel]) + atlasIndex;
+
+		// https://stackoverflow.com/questions/17399119/cant-we-use-atomic-operations-for-floating-point-variables-in-cuda/51549250#51549250
+		// Hack to support float atomic min using integer operations
+		if (value >= 0) {
+			__int_as_float(atomicMin((int*) cell, __float_as_int(value)));
+		} else {
+			__uint_as_float(atomicMax((unsigned int*) cell, __float_as_uint(value)));
+		}
+	}
+}
+
 inline __device__ void setLevelSetValue(VDBInfo* gvdb, int channel, float radius, float3 particlePosInBrick, int3 brickIndexInAtlas, int3 cellIndexInBrick) {
 	// Ensure the corresponding cell position for a particle is contained in the brick
 	// GVDB resolution at level 0 the width of an atlas brick, in terms of voxels
+	// TODO: handle apron voxels
 	float3 cellPosInBrick = make_float3(cellIndexInBrick);
 	if (cellPosInBrick.x >= 0 && cellPosInBrick.y >= 0 && cellPosInBrick.z >= 0
 		&& cellPosInBrick.x < gvdb->res[0] && cellPosInBrick.y < gvdb->res[0] && cellPosInBrick.z < gvdb->res[0]) {
@@ -633,12 +666,10 @@ inline __device__ void setLevelSetValue(VDBInfo* gvdb, int channel, float radius
 		float3 delta = (particlePosInBrick - cellPosInBrick);
 		float distance = norm3df(delta.x, delta.y, delta.z);
 
-		int3 cellIndexInAtlas =  brickIndexInAtlas + cellIndexInBrick;
+		int3 cellIndexInAtlas = brickIndexInAtlas + cellIndexInBrick;
 
-		// WARNING: non-atomic operation as textures doesn't support atomics - might cause write conflict
-		float levelSetValue = tex3D<float>(gvdb->volIn[channel], cellIndexInAtlas.x, cellIndexInAtlas.y, cellIndexInAtlas.z);
-		levelSetValue = min(levelSetValue, distance - radius); // A negative level set value at a point means that the point is inside
-		surf3Dwrite(levelSetValue, gvdb->volOut[channel], cellIndexInAtlas.x * sizeof(float), cellIndexInAtlas.y, cellIndexInAtlas.z);
+		// A negative level set value at a point means that the point is inside
+		writeMinFloatToAtlas(gvdb, channel, cellIndexInAtlas, distance - radius);
 	}
 }
 
@@ -647,7 +678,8 @@ extern "C" __global__ void gvdbScatterReduceLevelSet(
 	VDBInfo* gvdb, int num_pnts, float radius,
 	char* ppos, int pos_off, int pos_stride,
 	char* pclr, int clr_off, int clr_stride,
-	int* pnode, float3 ptrans, bool expand, uint* colorBuf)
+	int* pnode, float3 ptrans, bool expand, uint* colorBuf,
+	int chanLevelSet, int chanClr)
 {
     uint i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= num_pnts) return;
@@ -662,65 +694,65 @@ extern "C" __global__ void gvdbScatterReduceLevelSet(
 	int3 cellIndexInBrick = make_int3(particlePosInBrick / gvdb->vdel[0]);
 
 	if (expand) {
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x-1, cellIndexInBrick.y-1, cellIndexInBrick.z-1));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x-1, cellIndexInBrick.y-1, cellIndexInBrick.z));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x-1, cellIndexInBrick.y-1, cellIndexInBrick.z+1));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x-1, cellIndexInBrick.y, cellIndexInBrick.z-1));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x-1, cellIndexInBrick.y, cellIndexInBrick.z));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x-1, cellIndexInBrick.y, cellIndexInBrick.z+1));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x-1, cellIndexInBrick.y+1, cellIndexInBrick.z-1));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x-1, cellIndexInBrick.y+1, cellIndexInBrick.z));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x-1, cellIndexInBrick.y+1, cellIndexInBrick.z+1));
 
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x, cellIndexInBrick.y-1, cellIndexInBrick.z-1));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x, cellIndexInBrick.y-1, cellIndexInBrick.z));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x, cellIndexInBrick.y-1, cellIndexInBrick.z+1));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x, cellIndexInBrick.y, cellIndexInBrick.z-1));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x, cellIndexInBrick.y, cellIndexInBrick.z));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x, cellIndexInBrick.y, cellIndexInBrick.z+1));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x, cellIndexInBrick.y+1, cellIndexInBrick.z-1));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x, cellIndexInBrick.y+1, cellIndexInBrick.z));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x, cellIndexInBrick.y+1, cellIndexInBrick.z+1));
 
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x+1, cellIndexInBrick.y-1, cellIndexInBrick.z-1));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x+1, cellIndexInBrick.y-1, cellIndexInBrick.z));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x+1, cellIndexInBrick.y-1, cellIndexInBrick.z+1));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x+1, cellIndexInBrick.y, cellIndexInBrick.z-1));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x+1, cellIndexInBrick.y, cellIndexInBrick.z));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x+1, cellIndexInBrick.y, cellIndexInBrick.z+1));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x+1, cellIndexInBrick.y+1, cellIndexInBrick.z-1));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x+1, cellIndexInBrick.y+1, cellIndexInBrick.z));
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas,
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas,
 			make_int3(cellIndexInBrick.x+1, cellIndexInBrick.y+1, cellIndexInBrick.z+1));
 
 	} else {
-		setLevelSetValue(gvdb, 0, radius, particlePosInBrick, brickIndexInAtlas, cellIndexInBrick);
+		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInBrick, brickIndexInAtlas, cellIndexInBrick);
 	}
 
 	if ( pclr != 0 ) {
@@ -741,7 +773,7 @@ extern "C" __global__ void gvdbScatterReduceLevelSet(
 		}
 		else {
 			int3 cellIndexInAtlas = brickIndexInAtlas + cellIndexInBrick;
-		 	surf3Dwrite(wclr, gvdb->volOut[3], cellIndexInAtlas.x*sizeof(uchar4), cellIndexInAtlas.y, cellIndexInAtlas.z);
+		 	surf3Dwrite(wclr, gvdb->volOut[chanClr], cellIndexInAtlas.x*sizeof(uchar4), cellIndexInAtlas.y, cellIndexInAtlas.z);
 		}
 	}
 }
@@ -1464,4 +1496,14 @@ extern "C" __global__ void gvdbBitonicSort(int *dev_values, int num_pnts, int j,
 	}
 }
 
+extern "C" __global__ void copyLinearChannelToTextureChannelF(VDBInfo* gvdb, int chanDst, int chanSrc, int3 dimensions)
+{
+	uint3 idx = blockIdx * make_uint3(blockDim.x, blockDim.y, blockDim.z) + threadIdx;
+	if (idx.x < dimensions.x && idx.y < dimensions.y && idx.z < dimensions.z) {
+		int3 atlasSize = gvdb->atlas_res;
+		unsigned long int atlasIndex = idx.z * atlasSize.x * atlasSize.y + idx.y * atlasSize.x + idx.x;
+		float* cell = (float*) gvdb->atlas_dev_mem[chanSrc] + atlasIndex;
 
+		surf3Dwrite(*cell, gvdb->volOut[chanDst], idx.x * sizeof(float), idx.y, idx.z);
+	}
+}

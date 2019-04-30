@@ -236,6 +236,8 @@
 	#define FUNC_CLR_EXPAND			116
 	#define FUNC_EXPANDC			117
 
+	#define FUNC_COPY_LINEAR_CHANNEL_TO_TEXTURE_CHANNEL_F 150
+
 	#define MAX_FUNC				255
 
 	#define SR_HIT_OFFSET			0
@@ -542,7 +544,7 @@
 			void GatherDensity			(int subcell_size, int num_pnts, float radius, Vector3DF trans, int& pSCPntsLength, int chanDensity,  int chanClr, bool bAccum=false);
 			void GatherLevelSet			(int subcell_size, int num_pnts, float radius, Vector3DF trans, int& pSCPntsLength, int chanLevelset, int chanClr, bool bAccum=false);
 			void GatherLevelSet_FP16	(int subcell_size, int num_pnts, float radius, Vector3DF trans, int& pSCPntsLength, int chanLevelSet, int chanClr);
-			void ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, bool expand);
+			void ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, bool expand, int chanLevelSet, int chanClr);
 			//TODO: use better format: void ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, int chanDensity, int chanClr);
 			void ConvertAndTransform(DataPtr& psrc, char psrcbits, DataPtr& pdest, char pdestbits, int num_pnts, Vector3DF wMin, Vector3DF wMax, Vector3DF trans, Vector3DF scal);
 
@@ -552,6 +554,7 @@
 			Vector3DF getBoundMax() { return mPosMax; }			
 			void GetMinMaxVel(int num_pnts);
 			void CopyChannel(int chanDst, int chanSrc);
+			void CopyLinearChannelToTextureChannel(int chanDst, int chanSrc);
 			char* GetTestPtr();
 			void PrintMemUsage();
 

@@ -321,14 +321,14 @@ void VolumeGVDB::SetCudaDevice ( int devid, CUcontext ctx )
 
 	LoadFunction ( FUNC_READ_GRID_VEL,		"gvdbReadGridVel",				MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_CHECK_VAL,			"gvdbCheckVal",					MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
-	
+
 	// Apron Updates
 	LoadFunction ( FUNC_UPDATEAPRON_F,		"gvdbUpdateApronF",				MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_UPDATEAPRON_F4,		"gvdbUpdateApronF4",			MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_UPDATEAPRON_C,		"gvdbUpdateApronC",				MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_UPDATEAPRON_C4,		"gvdbUpdateApronC4",			MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_UPDATEAPRONFACES_F, "gvdbUpdateApronFacesF",		MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
-	
+
 	// Operators
 	LoadFunction ( FUNC_FILL_F,				"gvdbOpFillF",					MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_FILL_C,				"gvdbOpFillC",					MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
@@ -338,7 +338,9 @@ void VolumeGVDB::SetCudaDevice ( int devid, CUcontext ctx )
 	LoadFunction ( FUNC_CLR_EXPAND,			"gvdbOpClrExpand",				MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_EXPANDC,			"gvdbOpExpandC",				MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 
-	SetModule ( cuModule[MODL_PRIMARY] );	
+	LoadFunction ( FUNC_COPY_LINEAR_CHANNEL_TO_TEXTURE_CHANNEL_F, "copyLinearChannelToTextureChannelF", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
+
+	SetModule ( cuModule[MODL_PRIMARY] );
 
 	POP_CTX
 }
@@ -2871,6 +2873,35 @@ void VolumeGVDB::CopyChannel(int chanDst, int chanSrc)
 {
 	PUSH_CTX
 	mPool->CopyChannel(chanDst, chanSrc);
+	POP_CTX
+}
+
+// TODO: handle data types other than float
+void VolumeGVDB::CopyLinearChannelToTextureChannel(int chanDst, int chanSrc)
+{
+	PUSH_CTX
+
+	DataPtr pDst = mPool->getAtlas(chanDst);
+	DataPtr pSrc = mPool->getAtlas(chanSrc);
+
+	Vector3DI axiscnt = pSrc.subdim; // number of bricks on each axis
+	Vector3DI axisres = axiscnt * int(pSrc.stride + pSrc.apron * 2);
+	axisres.z = pSrc.size / (axisres.x * axisres.y * sizeof(float));
+
+	int blockSize = 8;
+	int blockX = (axisres.x + blockSize - 1) / blockSize;
+	int blockY = (axisres.y + blockSize - 1) / blockSize;
+	int blockZ = (axisres.z + blockSize - 1) / blockSize;
+
+	void *args[4] = {
+		&cuVDBInfo,
+		&chanDst,
+		&chanSrc,
+		&axisres};
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_COPY_LINEAR_CHANNEL_TO_TEXTURE_CHANNEL_F], blockX, blockY, blockZ, blockSize, blockSize, blockSize, 0, NULL, args, NULL),
+		"VolumeGVDB", "CopyLinearChannelToTextureChannel", "cuLaunch", "FUNC_COPY_LINEAR_CHANNEL_TO_TEXTURE_CHANNEL_F", mbDebug);
+
 	POP_CTX
 }
 
@@ -6090,13 +6121,13 @@ void VolumeGVDB::ScatterDensity ( int num_pnts, float radius, float amp, Vector3
 				"VolumeGVDB", "ScatterPointDensity", "cuLaunch", "FUNC_SCATTER_AVG_COL", mbDebug);			
 	}
 
-	PERF_POP ();	
+	PERF_POP ();
 
 	POP_CTX
 }
 
 //TODO: use better format: void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, int chanDensity, int chanClr)
-void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, bool expand) {
+void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, bool expand, int chanLevelSet, int chanClr) {
 	uint num_voxels;
 
 	PrepareVDB();
@@ -6108,7 +6139,7 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 	int threads = 256;
   	int pblks = int(num_pnts / threads) + 1;
 
-	void *args[13] = {
+	void *args[15] = {
 		&cuVDBInfo,
 		&num_pnts,
 		&radius,
@@ -6121,7 +6152,9 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 		&mAux[AUX_PNODE].gpu,
 		&trans.x,
 		&expand,
-		&mAux[AUX_COLAVG].gpu
+		&mAux[AUX_COLAVG].gpu,
+		&chanLevelSet,
+		&chanClr
 	};
 	cudaCheck(
 		cuLaunchKernel(cuFunc[FUNC_SCATTER_REDUCE_LEVEL_SET], pblks, 1, 1, threads, 1, 1, 0, NULL, args, NULL),
