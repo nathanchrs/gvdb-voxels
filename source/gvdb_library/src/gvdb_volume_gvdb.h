@@ -191,7 +191,8 @@
 	#define FUNC_GATHER_DENSITY		51	
 	#define FUNC_GATHER_LEVELSET	52
 	#define FUNC_GATHER_LEVELSET_FP16		53
-	#define FUNC_SCATTER_REDUCE_LEVEL_SET 55
+	#define FUNC_SCATTER_LEVEL_SET 55
+	#define FUNC_SCATTER_REDUCE_LEVEL_SET 56
 	
 	// Topology
 	#define FUNC_FIND_ACTIV_BRICKS	60
@@ -544,6 +545,7 @@
 			void GatherDensity			(int subcell_size, int num_pnts, float radius, Vector3DF trans, int& pSCPntsLength, int chanDensity,  int chanClr, bool bAccum=false);
 			void GatherLevelSet			(int subcell_size, int num_pnts, float radius, Vector3DF trans, int& pSCPntsLength, int chanLevelset, int chanClr, bool bAccum=false);
 			void GatherLevelSet_FP16	(int subcell_size, int num_pnts, float radius, Vector3DF trans, int& pSCPntsLength, int chanLevelSet, int chanClr);
+			void ScatterLevelSet(int num_pnts, float radius, Vector3DF trans, int chanLevelSet);
 			void ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, bool expand, int chanLevelSet, int chanClr);
 			//TODO: use better format: void ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, int chanDensity, int chanClr);
 			void ConvertAndTransform(DataPtr& psrc, char psrcbits, DataPtr& pdest, char pdestbits, int num_pnts, Vector3DF wMin, Vector3DF wMax, Vector3DF trans, Vector3DF scal);

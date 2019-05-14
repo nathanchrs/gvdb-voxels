@@ -312,6 +312,7 @@ void VolumeGVDB::SetCudaDevice ( int devid, CUcontext ctx )
 	LoadFunction ( FUNC_GATHER_LEVELSET,	"gvdbGatherLevelSet",			MODL_PRIMARY, CUDA_GVDB_MODULE_PTX);
 	LoadFunction ( FUNC_GATHER_LEVELSET_FP16, "gvdbGatherLevelSet_fp16", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX);
 
+	LoadFunction ( FUNC_SCATTER_LEVEL_SET, "gvdbScatterLevelSet", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_SCATTER_REDUCE_LEVEL_SET, "gvdbScatterReduceLevelSet", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 
 	LoadFunction ( FUNC_CALC_SUBCELL_POS,	"gvdbCalcSubcellPos",			MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
@@ -6123,6 +6124,36 @@ void VolumeGVDB::ScatterDensity ( int num_pnts, float radius, float amp, Vector3
 
 	PERF_POP ();
 
+	POP_CTX
+}
+
+void VolumeGVDB::ScatterLevelSet(int num_pnts, float radius, Vector3DF trans, int chanLevelSet) {
+	uint num_voxels;
+
+	PrepareVDB();
+	PUSH_CTX
+	PERF_PUSH("ScatterLevelSet");
+
+	int threads = 256;
+  	int pblks = int(num_pnts / threads) + 1;
+
+	void *args[8] = {
+		&cuVDBInfo,
+		&num_pnts,
+		&radius,
+		&mAux[AUX_PNTPOS].gpu,
+		&mAux[AUX_PNTPOS].subdim.x,
+		&mAux[AUX_PNTPOS].stride,
+		&trans.x,
+		&chanLevelSet
+	};
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_SCATTER_LEVEL_SET], pblks, 1, 1, threads, 1, 1, 0, NULL, args, NULL),
+        "VolumeGVDB", "ScatterLevelSet", "cuLaunch",
+        "FUNC_SCATTER_LEVEL_SET", mbDebug
+	);
+
+	PERF_POP();
 	POP_CTX
 }
 
