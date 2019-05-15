@@ -1496,3 +1496,20 @@ extern "C" __global__ void copyLinearChannelToTextureChannelF(VDBInfo* gvdb, int
 		surf3Dwrite(*cell, gvdb->volOut[chanDst], idx.x * sizeof(float), idx.y, idx.z);
 	}
 }
+
+extern "C" __global__ void compareTextureChannelsF(VDBInfo* gvdb, int chanActual, int chanExpected, int3 dimensions, int* comparedCellCount, int* differingCellCount)
+{
+	uint3 idx = blockIdx * make_uint3(blockDim.x, blockDim.y, blockDim.z) + threadIdx;
+	if (idx.x < dimensions.x && idx.y < dimensions.y && idx.z < dimensions.z) {
+		float actual = tex3D<float>(gvdb->volIn[chanActual], idx.x + 0.5f, idx.y + 0.5f, idx.z + 0.5f);
+		float expected = tex3D<float>(gvdb->volIn[chanExpected], idx.x + 0.5f, idx.y + 0.5f, idx.z + 0.5f);
+
+		atomicAdd(comparedCellCount, 1);
+
+		const float epsilon = 1e-6;
+		if (fabsf(actual - expected) >= epsilon) { // different value
+			atomicAdd(differingCellCount, 1);
+			printf("DIFF - cell position (%d, %d, %d), actual %f, expected %f, diff %f\n", idx.x, idx.y, idx.z, actual, expected, fabsf(actual-expected));
+		}
+	}
+}

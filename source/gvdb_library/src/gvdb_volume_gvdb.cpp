@@ -340,6 +340,7 @@ void VolumeGVDB::SetCudaDevice ( int devid, CUcontext ctx )
 	LoadFunction ( FUNC_EXPANDC,			"gvdbOpExpandC",				MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 
 	LoadFunction ( FUNC_COPY_LINEAR_CHANNEL_TO_TEXTURE_CHANNEL_F, "copyLinearChannelToTextureChannelF", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
+	LoadFunction ( FUNC_COMPARE_TEXTURE_CHANNELS_F, "compareTextureChannelsF", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 
 	SetModule ( cuModule[MODL_PRIMARY] );
 
@@ -6359,4 +6360,62 @@ Vector3DF VolumeGVDB::getWorldMax()
 {
 	Vector3DF wmax = mObjMax; wmax *= mXform;
 	return wmax;
+}
+
+// TODO: handle data types other than float; support linear channels too
+void VolumeGVDB::CompareChannels(int chanActual, int chanExpected)
+{
+	PUSH_CTX
+
+	gprintf("CompareChannels (actual: channel %d, expected: channel %d)...\n", chanActual, chanExpected);
+
+	DataPtr pActual = mPool->getAtlas(chanActual);
+	DataPtr pExpected = mPool->getAtlas(chanExpected);
+
+	Vector3DI axiscnt = pExpected.subdim; // number of bricks on each axis
+	Vector3DI axisres = axiscnt * int(pExpected.stride + pExpected.apron * 2);
+	axisres.z = pExpected.size / (axisres.x * axisres.y * sizeof(float));
+
+	int blockSize = 8;
+	int blockX = (axisres.x + blockSize - 1) / blockSize;
+	int blockY = (axisres.y + blockSize - 1) / blockSize;
+	int blockZ = (axisres.z + blockSize - 1) / blockSize;
+
+	int comparedCellCount = 0;;
+	int differingCellCount = 0;
+	CUdeviceptr d_comparedCellCount;
+	CUdeviceptr d_differingCellCount;
+	cudaCheck(cuMemAlloc(&d_comparedCellCount, sizeof(int)),
+		"VolumeGVDB", "CompareChannels", "cuMemAlloc", "comparedCellCount", mbDebug);
+	cudaCheck(cuMemAlloc(&d_differingCellCount, sizeof(int)),
+		"VolumeGVDB", "CompareChannels", "cuMemAlloc", "differingCellCount", mbDebug);
+	cudaCheck(cuMemcpyHtoD(d_comparedCellCount, &comparedCellCount, sizeof(int)),
+		"VolumeGVDB", "CompareChannels", "cuMemcpyHtoD", "comparedCellCount", mbDebug);
+	cudaCheck(cuMemcpyHtoD(d_differingCellCount, &differingCellCount, sizeof(int)),
+		"VolumeGVDB", "CompareChannels", "cuMemcpyHtoD", "differingCellCount", mbDebug);
+
+	void *args[6] = {
+		&cuVDBInfo,
+		&chanActual,
+		&chanExpected,
+		&axisres,
+		&d_comparedCellCount,
+		&d_differingCellCount
+	};
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_COMPARE_TEXTURE_CHANNELS_F], blockX, blockY, blockZ, blockSize, blockSize, blockSize, 0, NULL, args, NULL),
+		"VolumeGVDB", "CompareChannels", "cuLaunch", "FUNC_COMPARE_TEXTURE_CHANNELS_F", mbDebug);
+
+	cudaCheck(cuMemcpyDtoH(&comparedCellCount, d_comparedCellCount, sizeof(int)),
+		"VolumeGVDB", "CompareChannels", "cuMemcpyDtoH", "comparedCellCount", mbDebug);
+	cudaCheck(cuMemcpyDtoH(&differingCellCount, d_differingCellCount, sizeof(int)),
+		"VolumeGVDB", "CompareChannels", "cuMemcpyDtoH", "differingCellCount", mbDebug);
+	cudaCheck(cuMemFree(d_comparedCellCount),
+		"VolumeGVDB", "CompareChannels", "cuMemFree", "comparedCellCount", mbDebug);
+	cudaCheck(cuMemFree(d_differingCellCount),
+		"VolumeGVDB", "CompareChannels", "cuMemFree", "differingCellCount", mbDebug);
+
+	gprintf("Result:.\n  Cells compared: %d\n  Differing cells: %d\n", comparedCellCount, differingCellCount);
+
+	POP_CTX
 }

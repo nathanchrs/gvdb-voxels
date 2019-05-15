@@ -238,6 +238,7 @@
 	#define FUNC_EXPANDC			117
 
 	#define FUNC_COPY_LINEAR_CHANNEL_TO_TEXTURE_CHANNEL_F 150
+	#define FUNC_COMPARE_TEXTURE_CHANNELS_F 151
 
 	#define MAX_FUNC				255
 
@@ -557,6 +558,7 @@
 			void GetMinMaxVel(int num_pnts);
 			void CopyChannel(int chanDst, int chanSrc);
 			void CopyLinearChannelToTextureChannel(int chanDst, int chanSrc);
+			void CompareChannels(int chanActual, int chanExpected);
 			char* GetTestPtr();
 			void PrintMemUsage();
 
