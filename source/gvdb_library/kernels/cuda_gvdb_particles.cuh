@@ -986,9 +986,15 @@ extern "C" __global__ void gvdbGatherLevelSet (VDBInfo* gvdb, int num_pnts, int 
 	}
 	for (int j = 0; j < sc_cnt[sc_id]; j++) {
 		jpos = sc_pnt_pos[sc_off[sc_id] + j] - make_float3(wpos);
-		c = sqrtf(jpos.x*jpos.x + jpos.y*jpos.y + jpos.z*jpos.z);
-		dist = min(dist, c - radius);
-		if (sc_pnt_clr != 0x0) clr += CHAR2CLR(sc_pnt_clr[sc_off[sc_id] + j]);
+
+		// DEBUG: try to limit radius to 1.5vdel (equivalent to scatter's 3x3x3 neighboring cells)
+		if (jpos.x >= -1.5*vdel.x && jpos.y >= -1.5*vdel.y && jpos.z >= -1.5*vdel.z
+			&& jpos.x < 1.5*vdel.x && jpos.y < 1.5*vdel.y && jpos.z < 1.5*vdel.z) {
+
+			c = sqrtf(jpos.x*jpos.x + jpos.y*jpos.y + jpos.z*jpos.z);
+			dist = min(dist, c - radius);
+			if (sc_pnt_clr != 0x0) clr += CHAR2CLR(sc_pnt_clr[sc_off[sc_id] + j]);
+		}
 	}
 	surf3Dwrite( dist, gvdb->volOut[chanLevelset], vox.x * sizeof(float), vox.y, vox.z);
 
