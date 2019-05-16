@@ -1735,19 +1735,17 @@ void VolumeGVDB::FinishTopology (bool pCommitPool, bool pComputeBounds)
 	// commit topology
 	if (pCommitPool)	mPool->PoolCommitAll();
 
-	// update VDB data on gpu 
-	mVDBInfo.update = true;	
+	// update VDB data on gpu
+	mVDBInfo.update = true;
 
 	POP_CTX
 }
 
-// Clear all channels
+// Reset a channel to its initial value
 void VolumeGVDB::ClearChannel (uchar chan)
 {
-	// This launches a kernel to clear the CUarray.
-	//   (there is no MemsetD8 for cuda arrays)
 	PUSH_CTX
-	mPool->AtlasFill(chan);	
+	mPool->AtlasFill(chan);
 	POP_CTX
 }
 
@@ -2677,20 +2675,20 @@ void VolumeGVDB::AddChannel ( uchar chan, int dt, int apron, int filter, int bor
 	POP_CTX
 }
 
-// Fill data channel
-void VolumeGVDB::FillChannel ( uchar chan, Vector4DF val )
+void VolumeGVDB::FillChannel(uchar chan, float val)
 {
 	PUSH_CTX
 
-	if (val.x == 0 && val.y==0 && val.z==0 && val.w==0) {
-		ClearChannel(chan);
-	} else {
-		switch (mPool->getAtlas(chan).type) {
-		case T_FLOAT:	Compute ( FUNC_FILL_F, chan, 1, val, false);	break;	
-		case T_UCHAR:	Compute ( FUNC_FILL_C, chan, 1, val, false );	break;
-		case T_UCHAR4:	Compute ( FUNC_FILL_C4, chan, 1, val, false );	break;	
-		};
-	}
+	mPool->AtlasFill(chan, val);
+
+	POP_CTX
+}
+
+void VolumeGVDB::FillChannel(uchar chan, Vector4DF val)
+{
+	PUSH_CTX
+
+	mPool->AtlasFill(chan, val);
 
 	POP_CTX
 }
@@ -2700,7 +2698,7 @@ void VolumeGVDB::DestroyChannels ()
 {
 	PUSH_CTX
 
-	mPool->AtlasReleaseAll ();		
+	mPool->AtlasReleaseAll ();
 	SetColorChannel ( -1 );
 
 	POP_CTX

@@ -33,6 +33,8 @@
 #include <cuda_runtime.h>
 #include <cuda.h>
 
+#define CLR2INT(c) ((uint((c.w) * 255.0f) << 24) | (uint((c.z) * 255.0f) << 16) | (uint((c.y) * 255.0f) << 8) | uint((c.x) * 255.0f))
+
 using namespace nvdb;
 
 
@@ -464,17 +466,16 @@ void Allocator::AllocateAtlasMemGPU(DataPtr& p, uchar dtype, Vector3DI res, bool
     CUdeviceptr old_array = p.gpu;
 
     if (res.x > 0 && res.y > 0 && res.z > 0) {
-      // Allocate new linear memory according to the size required
-	  // printf("Allocating device memory of size %u bytes\n", p.size);
       cudaCheck(cuMemAlloc(&p.gpu, p.size), "Allocator", "AllocateAtlasMemGPU", "cuMemAlloc", "", mbDebug);
       if (preserve > 0 && old_array != 0) {
-        // Set channel to init_val
-				// TODO: Deal with other data types other than floats
-				cudaCheck(cuMemsetD32(p.gpu, init_val.x, p.size/sizeof(float)), "Allocator", "AllocateAtlasMemGPU", "cuMemset", "", mbDebug);
+				LinearAtlasFill(p, init_val);
 
-        // Copy over preserved data
-        if (preserve>0 && preserve < res.x * res.y * res.z)
-          cudaCheck(cuMemcpyDtoD(p.gpu, old_array, preserve), "Allocator", "AllocateAtlasMemGPU", "cuMemcpyDtoD", "preserve", mbDebug);
+				// Copy over preserved data
+				if (preserve > p.size) {
+					printf("WARNING [Allocator::AllocateAtlasMemGPU]: preserving only %lu bytes out of %lu bytes requested due to atlas size constraints.", p.size, preserve);
+					preserve = p.size;
+				}
+				cudaCheck(cuMemcpyDtoD(p.gpu, old_array, preserve), "Allocator", "AllocateAtlasMemGPU", "cuMemcpyDtoD", "preserve", mbDebug);
       }
     } else {
       p.gpu = 0;
@@ -493,7 +494,7 @@ void Allocator::AllocateAtlasMap ( int stride, Vector3DI axiscnt )
 	q = mAtlasMap[0];
 	if ( axiscnt.x*axiscnt.y*axiscnt.z == q.max ) return;	// same size, return
 
-	// Reallocate atlas mapping 	
+	// Reallocate atlas mapping
 	q.max = axiscnt.x * axiscnt.y * axiscnt.z;	// max leaves supported
 	q.subdim = axiscnt;
 	q.usedNum = q.max;
@@ -502,7 +503,7 @@ void Allocator::AllocateAtlasMap ( int stride, Vector3DI axiscnt )
 	q.size = stride * q.max;					// list of mapping structs			
 	if ( q.cpu != 0x0 ) free ( q.cpu );
 	q.cpu = (char*) malloc ( q.size );			// cpu allocate		
-			
+
 	size_t sz = q.size;							// gpu allocate
 	if ( q.gpu != 0x0 ) cudaCheck ( cuMemFree ( q.gpu ), "Allocator", "AllocateAtlasMap", "cuMemFree", "", mbDebug);
 	cudaCheck ( cuMemAlloc ( &q.gpu, q.size ), "Allocator", "AllocateAtlasMap", "cuMemAlloc", "", mbDebug );
@@ -603,7 +604,7 @@ bool Allocator::AtlasResize ( uchar chan, int cx, int cy, int cz)
 	int leafdim = p.stride;
 	Vector3DI axiscnt (cx, cy, cz);
 	Vector3DI axisres;
-	
+
 	// Compute axis res
 	axisres = axiscnt * int(leafdim + p.apron * 2);
 	uint64 atlas_sz = uint64(getSize(p.type)) * axisres.x * uint64(axisres.y) * axisres.z;
@@ -611,14 +612,13 @@ bool Allocator::AtlasResize ( uchar chan, int cx, int cy, int cz)
 	p.size = atlas_sz;
 	p.subdim = axiscnt;
 
-	// Atlas		
+	// Atlas
 	if(mAtlasTexMem[chan]){
-		AllocateTextureGPU ( p, p.type, axisres, (p.glid!=-1), 0 );
+		AllocateTextureGPU(p, p.type, axisres, (p.glid != -1), 0, mAtlasInitVal[chan]);
+	} else {
+		AllocateAtlasMemGPU(p, p.type, axisres, (p.glid != -1), 0, mAtlasInitVal[chan]);
 	}
-	else{
-		AllocateAtlasMemGPU( p, p.type, axisres, (p.glid!=-1), 0 );
-	}
-	AllocateTextureCPU ( p, p.size, (p.cpu!=0x0), 0 );
+	AllocateTextureCPU(p, p.size, (p.cpu != 0x0), 0, mAtlasInitVal[chan]);
 	mAtlas[chan] = p;
 
 	return true;
@@ -678,14 +678,14 @@ bool Allocator::AtlasResize ( uchar chan, uint64 max_leaf )
 	p.size = atlas_sz;				// new total # bytes
 	p.subdim = axiscnt;				// new number of bricks on each axis
 
-	// Atlas	
+	// Atlas
 	if(mAtlasTexMem[chan]){
 		AllocateTextureGPU ( p, p.type, axisres, (p.glid!=-1), preserve, mAtlasInitVal[chan] );
 	}
 	else{
 		AllocateAtlasMemGPU( p, p.type, axisres, (p.glid!=-1), preserve, mAtlasInitVal[chan] );
 	}
-	AllocateTextureCPU ( p, p.size, (p.cpu!=0x0), preserve );
+	AllocateTextureCPU(p, p.size, (p.cpu != 0x0), preserve, mAtlasInitVal[chan]);
 	mAtlas[chan] = p;
 
 	return true;
@@ -748,10 +748,10 @@ Vector3DI Allocator::getAtlasPos ( uchar chan, uint64 id )
 {
 	Vector3DI p;
 	Vector3DI ac = mAtlas[chan].subdim;		// axis count	
-	int a2 = ac.x*ac.y;						
+	int a2 = ac.x*ac.y;
 	p.z = int( id / a2 );		id -= uint64(p.z)*a2;
 	p.y = int( id / ac.x );		id -= uint64(p.y)*ac.x;
-	p.x = int( id );	
+	p.x = int( id );
 	p = p * int(mAtlas[chan].stride + (mAtlas[chan].apron << 1) ) + mAtlas[chan].apron;
 	return p;
 }
@@ -785,7 +785,7 @@ void Allocator::AtlasCopyTex ( uchar chan, Vector3DI val, const DataPtr& src )
 	switch ( mAtlas[chan].type ) {
 	case T_UCHAR:	cudaCheck ( cuLaunchKernel ( cuCopyTexC, grid.x, grid.y, grid.z, block.x, block.y, block.z, 0, NULL, args, NULL ), "Allocator", "AtlasCopyTex", "cuLaunch", "cuCopyTexC", mbDebug); break;
 	case T_FLOAT:	cudaCheck ( cuLaunchKernel ( cuCopyTexF, grid.x, grid.y, grid.z, block.x, block.y, block.z, 0, NULL, args, NULL ), "Allocator", "AtlasCopyTex", "cuLaunch", "cuCopyTexF", mbDebug); break;
-	};		
+	};
 }
 void Allocator::AtlasCopyLinear ( uchar chan, Vector3DI offset, CUdeviceptr gpu_buf )
 {
@@ -795,14 +795,14 @@ void Allocator::AtlasCopyLinear ( uchar chan, Vector3DI offset, CUdeviceptr gpu_
 	Vector3DI brickres = Vector3DI(br,br,br);
 	Vector3DI block ( 8, 8, 8 );
 	Vector3DI grid ( int(brickres.x/block.x)+1, int(brickres.y/block.y)+1, int(brickres.z/block.z)+1 );	
-	
+
 	cudaCheck ( cuSurfRefSetArray( cuSurfWrite, reinterpret_cast<CUarray>(mAtlas[chan].garray), 0 ), "Allocator", "AtlasCopyLinear", "cuSurfRefSetArray", "cuSurfWrite", mbDebug);
 
 	void* args[3] = { &offset, &brickres, &gpu_buf };
 	switch ( mAtlas[chan].type ) {
 	case T_UCHAR:	cudaCheck ( cuLaunchKernel ( cuCopyBufToTexC, grid.x, grid.y, grid.z, block.x, block.y, block.z, 0, NULL, args, NULL ), "Allocator", "AtlasCopyLinear", "cuLaunch", "cuCopyBufToTexC", mbDebug); break;
 	case T_FLOAT:	cudaCheck ( cuLaunchKernel ( cuCopyBufToTexF, grid.x, grid.y, grid.z, block.x, block.y, block.z, 0, NULL, args, NULL ), "Allocator", "AtlasCopyLinear", "cuLaunch", "cuCopyBufToTexF", mbDebug); break;
-	};		
+	};
 
 }
 
@@ -858,27 +858,51 @@ void Allocator::AtlasCommitFromCPU ( uchar chan, uchar* src )
 	cp.WidthInBytes = res.x*sizeof(float);
 	cp.Height = res.y;
 	cp.Depth = res.z;
-	
+
 	cudaCheck ( cuMemcpy3D ( &cp ), "Allocator", "AtlasCommitFromCPU", "cuMemcpy3D", "", mbDebug);
 
 	//TODO: add HtoD copy here for device pointer
 }
 
-void Allocator::AtlasFill ( uchar chan )
+void Allocator::LinearAtlasFill(DataPtr atlas, Vector4DF val) {
+	switch (atlas.type) {
+	case T_FLOAT:
+		cudaCheck(cuMemsetD32(atlas.gpu, reinterpret_cast<unsigned int &>(val.x), atlas.size / sizeof(unsigned int)),
+			"Allocator", "AtlasFill", "cuMemsetD32", "", mbDebug);
+		break;
+	case T_UCHAR:
+		cudaCheck(cuMemsetD8(atlas.gpu, static_cast<unsigned char>(val.x), atlas.size / sizeof(unsigned char)),
+			"Allocator", "AtlasFill", "cuMemsetD8", "", mbDebug);
+		break;
+	case T_UCHAR4:
+		cudaCheck(cuMemsetD32(atlas.gpu, CLR2INT(val), atlas.size / sizeof(unsigned int)),
+			"Allocator", "AtlasFill", "cuMemsetD32", "", mbDebug);
+		break;
+	default:
+		printf("WARNING [Allocator::LinearAtlasFill]: Unsupported linear channel type.");
+	};
+}
+
+void Allocator::AtlasFill(uchar chan) { AtlasFill(chan, mAtlasInitVal[chan]); }
+void Allocator::AtlasFill(uchar chan, float val) { AtlasFill(chan, Vector4DF(val, 0.0, 0.0, 0.0)); }
+
+void Allocator::AtlasFill(uchar chan, Vector4DF val)
 {
-	if(mAtlasTexMem[chan]){
-		Vector3DI atlasres = getAtlasRes(chan);	
-		Vector3DI block ( 8, 8, 8 );
-		Vector3DI grid ( int(atlasres.x/block.x)+1, int(atlasres.y/block.y)+1, int(atlasres.z/block.z)+1 );	
-		
-		cudaCheck ( cuSurfRefSetArray( cuSurfWrite, reinterpret_cast<CUarray>(mAtlas[chan].garray), 0 ), "Allocator", "AtlasCommitFromCPU", "cuSurfRefSetArray", "cuSurfWrite", mbDebug);
-		int dsize = getSize( mAtlas[chan].type );
-		void* args[3] = { &atlasres, &dsize, &mAtlasInitVal[chan] };
-		cudaCheck ( cuLaunchKernel ( cuFillTex, grid.x, grid.y, grid.z, block.x, block.y, block.z, 0, mStream, args, NULL ), "Allocator", "AtlasCommitFromCPU", "cuLaunch", "cuFillTex", mbDebug);
-	}
-	else{
-		// TODO: Deal with non float init vals.
-		cudaCheck( cuMemsetD32(mAtlas[chan].gpu, mAtlasInitVal[chan].x, mAtlas[chan].size/sizeof(float)), "Allocator", "AtlasCommitFromCPU", "cuMemset", "", mbDebug);
+	if (mAtlasTexMem[chan]) {
+		Vector3DI atlasres = getAtlasRes(chan);
+		Vector3DI block(8, 8, 8);
+		Vector3DI grid(int(atlasres.x/block.x)+1, int(atlasres.y/block.y)+1, int(atlasres.z/block.z)+1);
+
+		cudaCheck(cuSurfRefSetArray( cuSurfWrite, reinterpret_cast<CUarray>(mAtlas[chan].garray), 0),
+			"Allocator", "AtlasCommitFromCPU", "cuSurfRefSetArray", "cuSurfWrite", mbDebug);
+
+		// TODO: separate kernels instead of passing dsize for max performance
+		int dsize = getSize(mAtlas[chan].type);
+		void* args[3] = { &atlasres, &dsize, &val };
+		cudaCheck(cuLaunchKernel(cuFillTex, grid.x, grid.y, grid.z, block.x, block.y, block.z, 0, mStream, args, NULL),
+			"Allocator", "AtlasCommitFromCPU", "cuLaunch", "cuFillTex", mbDebug);
+	} else {
+		LinearAtlasFill(mAtlas[chan], val);
 	}
 }
 

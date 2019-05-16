@@ -111,7 +111,7 @@
 		// Texture functions
 		bool	TextureCreate ( uchar chan, uchar dtype, Vector3DI res, bool bCPU, bool bGL );
 		void	AllocateTextureGPU ( DataPtr& p, uchar dtype, Vector3DI res, bool bGL, uint64 preserve, Vector4DF init_val = {.0f, .0f, .0f, .0f} );
-		void	AllocateTextureCPU ( DataPtr& p, uint64 sz, bool bCPU, uint64 preserve, Vector4DF init_val = {.0f, .0f, .0f, .0f} );		
+		void	AllocateTextureCPU ( DataPtr& p, uint64 sz, bool bCPU, uint64 preserve, Vector4DF init_val = {.0f, .0f, .0f, .0f} );
 		// Custom Extension for allocating device memory instead of texture
 		void 	AllocateAtlasMemGPU( DataPtr& p, uchar dtype, Vector3DI res, bool bGL, uint64 preserve, Vector4DF init_val = {.0f, .0f, .0f, .0f} );
 
@@ -124,8 +124,12 @@
 		void	AtlasReleaseAll ();
 		void	AtlasEmptyAll ();
 		bool	AtlasAlloc ( uchar chan, Vector3DI& val );
-		void	AtlasFill ( uchar chan );		
-		void	AtlasCommit ( uchar chan );										// commit CPU atlas data to GPU
+		void 	LinearAtlasFill(DataPtr atlas, Vector4DF val);
+		void    AtlasFill(uchar chan);
+		void    AtlasFill(uchar chan, float val);
+		void    AtlasFill(uchar chan, Vector4DF val);
+
+		void 	AtlasCommit(uchar chan); // commit CPU atlas data to GPU
 		void	AtlasCommitFromCPU ( uchar chan, uchar* src );					// host-to-device copy from 3D to 3D (entire vol)				
 		void	AtlasAppendLinearCPU ( uchar chan, int n, float* src );			// CPU only, append 3D data linearly to end of atlas (no GPU update)
 		void	AtlasCopyTex ( uchar chan, Vector3DI val, const DataPtr& src );		// device-to-device copy 3D sub-vol into 3D 
@@ -198,7 +202,7 @@
 		CUstream					mStream;
 
 		CUmodule					cuAllocatorModule;
-		CUfunction					cuFillTex;	
+		CUfunction					cuFillTex;
 		CUfunction					cuCopyTexC;
 		CUfunction					cuCopyTexF;
 		CUfunction					cuCopyBufToTexC;
@@ -207,7 +211,7 @@
 		CUfunction					cuRetrieveTexXYZ;
 		CUfunction					cuSliceTexToBufF;
 		CUfunction					cuSliceTexToBufC;
-		CUfunction					cuSliceBufToTexF;		
+		CUfunction					cuSliceBufToTexF;
 		CUfunction					cuSliceBufToTexC;
 
 		CUsurfref					cuSurfWrite;
