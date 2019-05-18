@@ -239,6 +239,9 @@
 
 	#define FUNC_COPY_LINEAR_CHANNEL_TO_TEXTURE_CHANNEL_F 150
 	#define FUNC_COMPARE_TEXTURE_CHANNELS_F 151
+	#define FUNC_FILL_PARTICLE_INDEX 152
+	#define FUNC_FILL_PARTICLE_CELL_SORT_KEYS 153
+	#define FUNC_FILL_PARTICLE_BRICK_SORT_KEYS 154
 
 	#define MAX_FUNC				255
 
@@ -326,6 +329,10 @@
 	#define AUX_TEST_1				76
 	#define AUX_OUT1				77
 	#define AUX_OUT2				78
+
+	// Scatter with reduction
+	#define AUX_SORTED_PARTICLE_INDEX 80
+	#define AUX_PARTICLE_SORT_KEYS 81
 
 	#define MAX_AUX					96
 		
@@ -548,8 +555,8 @@
 			void GatherLevelSet			(int subcell_size, int num_pnts, float radius, Vector3DF trans, int& pSCPntsLength, int chanLevelset, int chanClr, bool bAccum=false);
 			void GatherLevelSet_FP16	(int subcell_size, int num_pnts, float radius, Vector3DF trans, int& pSCPntsLength, int chanLevelSet, int chanClr);
 			void ScatterLevelSet(int num_pnts, float radius, Vector3DF trans, int chanLevelSet);
-			void ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, bool expand, int chanLevelSet, int chanClr);
-			//TODO: use better format: void ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, int chanDensity, int chanClr);
+			void ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, int chanLevelSet);
+
 			void ConvertAndTransform(DataPtr& psrc, char psrcbits, DataPtr& pdest, char pdestbits, int num_pnts, Vector3DF wMin, Vector3DF wMax, Vector3DF trans, Vector3DF scal);
 
 			// Misc info
@@ -833,9 +840,10 @@
 
 			// CUDPP
 			CUDPPHandle		mCudpp;
-			CUDPPHandle		mPlan_max; 
-			CUDPPHandle		mPlan_min; 
+			CUDPPHandle		mPlan_max;
+			CUDPPHandle		mPlan_min;
 			CUDPPHandle		mPlan_sort;
+			CUDPPHandle		mPlan_scatterReduceParticleSort;
 
 			// CUDA Device & Context
 			int				mDevSelect;

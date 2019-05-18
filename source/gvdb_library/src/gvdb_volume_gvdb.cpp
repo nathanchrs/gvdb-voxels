@@ -172,50 +172,52 @@ VolumeGVDB::VolumeGVDB ()
 	mAuxName[AUX_DATA3D] = "DATA3D";
 	mAuxName[AUX_MATRIX4F] = "MATRIX4F";
 
-		mAuxName[AUX_PBRICKDX] = "PBRICKDX"; 
-		mAuxName[AUX_ACTIVBRICKCNT] = "ACTIVEBRICKCNT";
-		mAuxName[AUX_BRICK_LEVXYZ] = "BRICK_LEVXYZ";
-		mAuxName[AUX_RANGE_RES] = "RANGE_RES";
-		mAuxName[AUX_MARKER] = "MARKER";
-		mAuxName[AUX_RADIX_PRESCAN] = "RADIX_PRESCAN";
-		mAuxName[AUX_SORTED_LEVXYZ] = "SORTED_LEVXYZ";
-		mAuxName[AUX_TMP] = "TMP";
-		mAuxName[AUX_UNIQUE_CNT] = "UNIQUE_CNT";
-		mAuxName[AUX_MARKER_PRESUM] = "MARKER_PRESUM";
-		mAuxName[AUX_UNIQUE_LEVXYZ] = "UNIQUE_LEVXYZ";
-		mAuxName[AUX_LEVEL_CNT] = "LEVEL_CNT";
+	mAuxName[AUX_PBRICKDX] = "PBRICKDX"; 
+	mAuxName[AUX_ACTIVBRICKCNT] = "ACTIVEBRICKCNT";
+	mAuxName[AUX_BRICK_LEVXYZ] = "BRICK_LEVXYZ";
+	mAuxName[AUX_RANGE_RES] = "RANGE_RES";
+	mAuxName[AUX_MARKER] = "MARKER";
+	mAuxName[AUX_RADIX_PRESCAN] = "RADIX_PRESCAN";
+	mAuxName[AUX_SORTED_LEVXYZ] = "SORTED_LEVXYZ";
+	mAuxName[AUX_TMP] = "TMP";
+	mAuxName[AUX_UNIQUE_CNT] = "UNIQUE_CNT";
+	mAuxName[AUX_MARKER_PRESUM] = "MARKER_PRESUM";
+	mAuxName[AUX_UNIQUE_LEVXYZ] = "UNIQUE_LEVXYZ";
+	mAuxName[AUX_LEVEL_CNT] = "LEVEL_CNT";
 
-		mAuxName[AUX_EXTRA_BRICK_CNT] = "EXTRA_BRICK_CNT";
-		mAuxName[AUX_NODE_MARKER] = "NODE_MARKER";
-		mAuxName[AUX_PNTVEL] = "PNTVEL";
-		mAuxName[AUX_DIV] = "DIV";
+	mAuxName[AUX_EXTRA_BRICK_CNT] = "EXTRA_BRICK_CNT";
+	mAuxName[AUX_NODE_MARKER] = "NODE_MARKER";
+	mAuxName[AUX_PNTVEL] = "PNTVEL";
+	mAuxName[AUX_DIV] = "DIV";
 
-		mAuxName[AUX_SUBCELL_CNT] = "SUBCELL_CNT";
-		mAuxName[AUX_SUBCELL_PREFIXSUM] = "SUBCELL_PREFIXSUM";
-		mAuxName[AUX_SUBCELL_PNTS] = "SUBCELL_PNTS";
-		mAuxName[AUX_SUBCELL_POS] = "SUBCELL_POS";
-		mAuxName[AUX_SUBCELL_PNT_POS] = "SUBCELL_PNT_POS";
-		mAuxName[AUX_SUBCELL_PNT_VEL] = "SUBCELL_PNT_VEL";
-		mAuxName[AUX_SUBCELL_PNT_CLR] = "SUBCELL_PNT_CLR";
-		mAuxName[AUX_BOUNDING_BOX] = "BOUNDING_BOX";
-		mAuxName[AUX_WORLD_POS_X] = "WORLD_POS_X";
-		mAuxName[AUX_WORLD_POS_Y] = "WORLD_POS_Y";
-		mAuxName[AUX_WORLD_POS_Z] = "WORLD_POS_Z";
+	mAuxName[AUX_SUBCELL_CNT] = "SUBCELL_CNT";
+	mAuxName[AUX_SUBCELL_PREFIXSUM] = "SUBCELL_PREFIXSUM";
+	mAuxName[AUX_SUBCELL_PNTS] = "SUBCELL_PNTS";
+	mAuxName[AUX_SUBCELL_POS] = "SUBCELL_POS";
+	mAuxName[AUX_SUBCELL_PNT_POS] = "SUBCELL_PNT_POS";
+	mAuxName[AUX_SUBCELL_PNT_VEL] = "SUBCELL_PNT_VEL";
+	mAuxName[AUX_SUBCELL_PNT_CLR] = "SUBCELL_PNT_CLR";
+	mAuxName[AUX_BOUNDING_BOX] = "BOUNDING_BOX";
+	mAuxName[AUX_WORLD_POS_X] = "WORLD_POS_X";
+	mAuxName[AUX_WORLD_POS_Y] = "WORLD_POS_Y";
+	mAuxName[AUX_WORLD_POS_Z] = "WORLD_POS_Z";
 
-		mAuxName[AUX_VOLUME] = "VOLUME";
-		mAuxName[AUX_CG] = "CG";
-		mAuxName[AUX_INNER_PRODUCT] = "INNER_PRODUCT";
-		mAuxName[AUX_TEXTURE_MAX] = "TEXTURE_MAX";
-		mAuxName[AUX_TEXTURE_MAX_TMP] = "TEXTURE_MAX_TMP";
-		mAuxName[AUX_TEST] = "TEST";
-		mAuxName[AUX_TEST_1] = "TEST_1";
-		mAuxName[AUX_OUT1] = "OUT1";
-		mAuxName[AUX_OUT2] = "OUT2";
-		mAuxName[AUX_SUBCELL_MAPPING] = "SUBCELL_MAPPING";
-		mAuxName[AUX_SUBCELL_FLAG] = "SUBCELL_FLAG";
-		mAuxName[AUX_SUBCELL_NID] = "SUBCELL_NID";
-		mAuxName[AUX_SUBCELL_OBS_NID] = "SUBCELL_OBS_ND";
+	mAuxName[AUX_VOLUME] = "VOLUME";
+	mAuxName[AUX_CG] = "CG";
+	mAuxName[AUX_INNER_PRODUCT] = "INNER_PRODUCT";
+	mAuxName[AUX_TEXTURE_MAX] = "TEXTURE_MAX";
+	mAuxName[AUX_TEXTURE_MAX_TMP] = "TEXTURE_MAX_TMP";
+	mAuxName[AUX_TEST] = "TEST";
+	mAuxName[AUX_TEST_1] = "TEST_1";
+	mAuxName[AUX_OUT1] = "OUT1";
+	mAuxName[AUX_OUT2] = "OUT2";
+	mAuxName[AUX_SUBCELL_MAPPING] = "SUBCELL_MAPPING";
+	mAuxName[AUX_SUBCELL_FLAG] = "SUBCELL_FLAG";
+	mAuxName[AUX_SUBCELL_NID] = "SUBCELL_NID";
+	mAuxName[AUX_SUBCELL_OBS_NID] = "SUBCELL_OBS_ND";
 
+	mAuxName[AUX_SORTED_PARTICLE_INDEX] = "SORTED_PARTICLE_INDEX";
+	mAuxName[AUX_PARTICLE_SORT_KEYS] = "PARTICLE_SORT_KEYS";
 }
 
 void VolumeGVDB::SetProfile ( bool bCPU, bool bGPU ) 
@@ -341,6 +343,9 @@ void VolumeGVDB::SetCudaDevice ( int devid, CUcontext ctx )
 
 	LoadFunction ( FUNC_COPY_LINEAR_CHANNEL_TO_TEXTURE_CHANNEL_F, "copyLinearChannelToTextureChannelF", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_COMPARE_TEXTURE_CHANNELS_F, "compareTextureChannelsF", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
+	LoadFunction ( FUNC_FILL_PARTICLE_INDEX, "fillParticleIndex", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
+	LoadFunction ( FUNC_FILL_PARTICLE_CELL_SORT_KEYS, "fillParticleCellSortKeys", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
+	LoadFunction ( FUNC_FILL_PARTICLE_BRICK_SORT_KEYS, "fillParticleBrickSortKeys", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 
 	SetModule ( cuModule[MODL_PRIMARY] );
 
@@ -2558,24 +2563,32 @@ void VolumeGVDB::Initialize ()
 	config.datatype = CUDPP_FLOAT;
 	config.options = 0;
 	config.op = CUDPP_MAX;
- 
 
+	// TODO: this is dependent on the maximum number of particles
 	int maxNum = 1000000;	// TODO: no hard code later
 
-	result = cudppPlan(mCudpp, &mPlan_max, config, maxNum, 1, 0);  
-	if(result != CUDPP_SUCCESS) printf("Error in plan creation.\n");
+	result = cudppPlan(mCudpp, &mPlan_max, config, maxNum, 1, 0);
+	if(result != CUDPP_SUCCESS) printf("Error in max plan creation (error code: %d).\n", result);
 
 	config.op = CUDPP_MIN;
-	result = cudppPlan(mCudpp, &mPlan_min, config, maxNum, 1, 0);  
-	if(result != CUDPP_SUCCESS) printf("Error in plan creation.\n");
+	result = cudppPlan(mCudpp, &mPlan_min, config, maxNum, 1, 0);
+	if(result != CUDPP_SUCCESS) printf("Error in min plan creation (error code: %d).\n", result);
 
 	CUDPPConfiguration config_sort;
 	config_sort.algorithm = CUDPP_SORT_RADIX;
-	config_sort.datatype = CUDPP_LONGLONG;
+	config_sort.datatype = CUDPP_LONGLONG; // WARNING: CUDPP 2.3 docs says that keys must be 32-bit float or uint
 	config_sort.options = CUDPP_OPTION_KEYS_ONLY;
 
-	result = cudppPlan(mCudpp, &mPlan_sort, config_sort, maxNum, 1, 0);  
-	if(result != CUDPP_SUCCESS) printf("Error in plan creation.\n");
+	result = cudppPlan(mCudpp, &mPlan_sort, config_sort, maxNum, 1, 0);
+	if(result != CUDPP_SUCCESS) printf("Error in brick sort plan creation (error code: %d).\n", result);
+
+	CUDPPConfiguration config_scatterReduceParticleSort;
+	config_scatterReduceParticleSort.algorithm = CUDPP_SORT_RADIX;
+	config_scatterReduceParticleSort.datatype = CUDPP_UINT;
+	config_scatterReduceParticleSort.options = CUDPP_OPTION_KEY_VALUE_PAIRS;
+
+	result = cudppPlan(mCudpp, &mPlan_scatterReduceParticleSort, config_scatterReduceParticleSort, maxNum, 1, 0);
+	if(result != CUDPP_SUCCESS) printf("Error in scatterReduceParticleSort plan creation (error code: %d).\n", result);
 
 	mRebuildTopo = true;
 	mCurrDepth = -1;
@@ -6156,43 +6169,86 @@ void VolumeGVDB::ScatterLevelSet(int num_pnts, float radius, Vector3DF trans, in
 	POP_CTX
 }
 
-//TODO: use better format: void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, int chanDensity, int chanClr)
-void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, bool expand, int chanLevelSet, int chanClr) {
-	uint num_voxels;
+void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, int chanLevelSet) {
+	const int blockSize = 256;
+  	const int gridSize = (num_pnts + blockSize - 1) / blockSize;
 
-	PrepareVDB();
 	PUSH_CTX
 	PERF_PUSH("ScatterReduceLevelSet");
 
-  	// TODO: BEGIN scatterreducelevelset actual implementation
+	// Sort particles based on brick and cell position
+	PERF_PUSH("ScatterReduceLevelSet_Sort");
 
-	int threads = 256;
-  	int pblks = int(num_pnts / threads) + 1;
+	if (mAux[AUX_SORTED_PARTICLE_INDEX].lastEle < num_pnts) {
+		PrepareAux(AUX_SORTED_PARTICLE_INDEX, num_pnts, sizeof(unsigned int), false, false);
 
-	void *args[15] = {
+		// Fill particle index array with unsorted particle index (0..num_pnts-1)
+		void *fillParticleIndexArgs[2] = {
+			&num_pnts,
+			&mAux[AUX_SORTED_PARTICLE_INDEX].gpu
+		};
+		cudaCheck(
+			cuLaunchKernel(cuFunc[FUNC_FILL_PARTICLE_INDEX], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, fillParticleIndexArgs, NULL),
+			"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_FILL_PARTICLE_INDEX", mbDebug
+		);
+	}
+
+	PrepareAux(AUX_PARTICLE_SORT_KEYS, num_pnts, sizeof(unsigned int), false, false);
+
+	uint brickWidth = mPool->getAtlasBrickres(chanLevelSet);
+	void *fillParticleSortKeysArgs[8] = {
+		&num_pnts,
+		&mAux[AUX_PNTPOS].gpu,
+		&mAux[AUX_PNTPOS].subdim.x,
+		&mAux[AUX_PNTPOS].stride,
+		&mPosMin.x,
+		&mVDBInfo.vdel[0].x,
+		&brickWidth,
+		&mAux[AUX_PARTICLE_SORT_KEYS].gpu
+	};
+
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_FILL_PARTICLE_CELL_SORT_KEYS], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, fillParticleSortKeysArgs, NULL),
+		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_FILL_PARTICLE_CELL_SORT_KEYS", mbDebug
+	);
+
+	cudppRadixSort(mPlan_scatterReduceParticleSort, (void*) mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+		(void*) mAux[AUX_SORTED_PARTICLE_INDEX].gpu, num_pnts);
+
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_FILL_PARTICLE_BRICK_SORT_KEYS], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, fillParticleSortKeysArgs, NULL),
+		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_FILL_PARTICLE_BRICK_SORT_KEYS", mbDebug
+	);
+
+	cudppRadixSort(mPlan_scatterReduceParticleSort, (void*) mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+		(void*) mAux[AUX_SORTED_PARTICLE_INDEX].gpu, num_pnts);
+
+	PERF_POP();
+
+	// TODO: calculate other aux info
+
+	// Actual scattering
+	PERF_PUSH("ScatterReduceLevelSet_Scatter");
+	PrepareVDB();
+
+	void *args[9] = {
 		&cuVDBInfo,
 		&num_pnts,
 		&radius,
 		&mAux[AUX_PNTPOS].gpu,
 		&mAux[AUX_PNTPOS].subdim.x,
 		&mAux[AUX_PNTPOS].stride,
-		&mAux[AUX_PNTCLR].gpu,
-		&mAux[AUX_PNTCLR].subdim.x,
-		&mAux[AUX_PNTCLR].stride,
-		&mAux[AUX_PNODE].gpu,
+		&mAux[AUX_SORTED_PARTICLE_INDEX].gpu,
 		&trans.x,
-		&expand,
-		&mAux[AUX_COLAVG].gpu,
-		&chanLevelSet,
-		&chanClr
+		&chanLevelSet
 	};
 	cudaCheck(
-		cuLaunchKernel(cuFunc[FUNC_SCATTER_REDUCE_LEVEL_SET], pblks, 1, 1, threads, 1, 1, 0, NULL, args, NULL),
+		cuLaunchKernel(cuFunc[FUNC_SCATTER_REDUCE_LEVEL_SET], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, args, NULL),
         "VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch",
         "FUNC_SCATTER_REDUCE_LEVEL_SET", mbDebug
 	);
 
-	// TODO: END
+	PERF_POP();
 
 	PERF_POP();
 	POP_CTX

@@ -719,46 +719,43 @@ extern "C" __global__ void gvdbScatterLevelSet(
 extern "C" __global__ void gvdbScatterReduceLevelSet(
 	VDBInfo* gvdb, int num_pnts, float radius,
 	char* ppos, int pos_off, int pos_stride,
-	char* pclr, int clr_off, int clr_stride,
-	int* pnode, float3 ptrans, bool expand, uint* colorBuf,
-	int chanLevelSet, int chanClr)
+	uint* sortedParticleIndex,
+	float3 ptrans, int chanLevelSet)
 {
     uint i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= num_pnts) return;
 
-	float3 particlePosInWorld = (*(float3*) (ppos + i*pos_stride + pos_off));
+	float3 particlePosInWorld = (*(float3*) (ppos + sortedParticleIndex[i]*pos_stride + pos_off));
 	if ( particlePosInWorld.z == NOHIT ) { return; } // If position invalid, return
 	particlePosInWorld += ptrans;
 
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, -1, -1));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, -1, 0));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, -1, 1));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 0, -1));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 0, 0));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 0, 1));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 1, -1));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 1, 0));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 1, 1));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, -1, -1));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, -1, 0));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, -1, 1));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 0, -1));
 	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 0, 0));
-	if (expand) {
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, -1, -1));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, -1, 0));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, -1, 1));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 0, -1));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 0, 0));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 0, 1));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 1, -1));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 1, 0));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 1, 1));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, -1, -1));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, -1, 0));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, -1, 1));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 0, -1));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 0, 1));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 1, -1));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 1, 0));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 1, 1));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, -1, -1));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, -1, 0));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, -1, 1));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 0, -1));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 0, 0));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 0, 1));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 1, -1));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 1, 0));
-		setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 1, 1));
-	}
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 0, 1));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 1, -1));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 1, 0));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 1, 1));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, -1, -1));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, -1, 0));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, -1, 1));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 0, -1));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 0, 0));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 0, 1));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 1, -1));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 1, 0));
+	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 1, 1));
 }
 
 extern "C" __global__ void gvdbAddSupportVoxel (VDBInfo* gvdb, int num_pnts,  float radius, float offset, float amp,
@@ -1511,5 +1508,45 @@ extern "C" __global__ void compareTextureChannelsF(VDBInfo* gvdb, int chanActual
 			atomicAdd(differingCellCount, 1);
 			printf("DIFF - cell position (%d, %d, %d), actual %f, expected %f, diff %f\n", idx.x, idx.y, idx.z, actual, expected, fabsf(actual-expected));
 		}
+	}
+}
+
+extern "C" __global__ void fillParticleIndex(int particleCount, uint* particleIndex)
+{
+	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
+	if (idx < particleCount) {
+		particleIndex[idx] = idx;
+	}
+}
+
+extern "C" __global__ void fillParticleCellSortKeys(
+	int particleCount, char* ppos, int pos_off, int pos_stride,
+	float3 minWorldPosition, float3 voxelDimension, uint brickWidth, uint* particleSortKeys)
+{
+	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
+	if (idx < particleCount) {
+		float3 particlePosInWorld = *(float3*) (ppos + idx*pos_stride + pos_off);
+		float3 cellPosNormalized = (particlePosInWorld - minWorldPosition) / voxelDimension;
+
+		// Each dimension is represented as 10 bits
+		particleSortKeys[idx] = (__float2uint_rd(cellPosNormalized.x) & 0x3ff)
+			+ ((__float2uint_rd(cellPosNormalized.y) << 10) & (0x3ff << 10))
+			+ ((__float2uint_rd(cellPosNormalized.z) << 20) & (0x3ff << 20));
+	}
+}
+
+extern "C" __global__ void fillParticleBrickSortKeys(
+	int particleCount, char* ppos, int pos_off, int pos_stride,
+	float3 minWorldPosition, float3 voxelDimension, uint brickWidth, uint* particleSortKeys)
+{
+	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
+	if (idx < particleCount) {
+		float3 particlePosInWorld = *(float3*) (ppos + idx*pos_stride + pos_off);
+		float3 brickPosNormalized = (particlePosInWorld - minWorldPosition) / (voxelDimension * brickWidth);
+
+		// Each dimension is represented as 10 bits
+		particleSortKeys[idx] = (__float2uint_rd(brickPosNormalized.x) & 0x3ff)
+			+ ((__float2uint_rd(brickPosNormalized.y) << 10) & (0x3ff << 10))
+			+ ((__float2uint_rd(brickPosNormalized.z) << 20) & (0x3ff << 20));
 	}
 }
