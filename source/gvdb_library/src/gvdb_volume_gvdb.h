@@ -228,10 +228,10 @@
 	#define FUNC_UPDATEAPRONFACES_F4	108
 
 	// Operators
-	#define FUNC_FILL_F				110		
-	#define FUNC_FILL_C				111	
+	#define FUNC_FILL_F				110
+	#define FUNC_FILL_C				111
 	#define FUNC_FILL_C4			112
-	#define FUNC_SMOOTH				113		
+	#define FUNC_SMOOTH				113
 	#define FUNC_NOISE				114
 	#define FUNC_GROW				115
 	#define FUNC_CLR_EXPAND			116
@@ -243,6 +243,7 @@
 	#define FUNC_FILL_PARTICLE_CELL_SORT_KEYS 153
 	#define FUNC_FILL_PARTICLE_BRICK_SORT_KEYS 154
 	#define FUNC_MARK_PARTICLE_FLAG 155
+	#define FUNC_COMPUTE_BRICK_FLAG_OFFSETS 156
 
 	#define MAX_FUNC				255
 
@@ -336,6 +337,7 @@
 	#define AUX_PARTICLE_SORT_KEYS 81
 	#define AUX_PARTICLE_CELL_FLAG 82
 	#define AUX_PARTICLE_BRICK_FLAG 83
+	#define AUX_BRICK_FLAG_OFFSETS 84
 
 	#define MAX_AUX					96
 		

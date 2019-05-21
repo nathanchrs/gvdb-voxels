@@ -1559,3 +1559,11 @@ extern "C" __global__ void markParticleFlag(int particleCount, uint* particleSor
 		flag[idx] = (idx == 0 || particleSortKeys[idx - 1] != particleSortKeys[idx]);
 	}
 }
+
+extern "C" __global__ void computeBrickFlagOffsets(int particleCount, uint* brickNumbers, uint* brickFlag, uint* brickFlagOffsets)
+{
+	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
+	if (idx < particleCount && brickFlag[idx]) {
+		brickFlagOffsets[brickNumbers[idx] - 1] = idx; // Brick numbers start from 1
+	}
+}

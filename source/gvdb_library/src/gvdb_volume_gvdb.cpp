@@ -220,6 +220,7 @@ VolumeGVDB::VolumeGVDB ()
 	mAuxName[AUX_PARTICLE_SORT_KEYS] = "PARTICLE_SORT_KEYS";
 	mAuxName[AUX_PARTICLE_CELL_FLAG] = "PARTICLE_CELL_FLAG";
 	mAuxName[AUX_PARTICLE_BRICK_FLAG] = "PARTICLE_BRICK_FLAG";
+	mAuxName[AUX_BRICK_FLAG_OFFSETS] = "BRICK_FLAG_OFFSETS";
 }
 
 void VolumeGVDB::SetProfile ( bool bCPU, bool bGPU ) 
@@ -349,6 +350,7 @@ void VolumeGVDB::SetCudaDevice ( int devid, CUcontext ctx )
 	LoadFunction ( FUNC_FILL_PARTICLE_CELL_SORT_KEYS, "fillParticleCellSortKeys", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_FILL_PARTICLE_BRICK_SORT_KEYS, "fillParticleBrickSortKeys", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_MARK_PARTICLE_FLAG, "markParticleFlag", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
+	LoadFunction ( FUNC_COMPUTE_BRICK_FLAG_OFFSETS, "computeBrickFlagOffsets", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 
 	SetModule ( cuModule[MODL_PRIMARY] );
 
@@ -6207,6 +6209,7 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 	PrepareAux(AUX_PARTICLE_SORT_KEYS, num_pnts, sizeof(unsigned int), false, false);
 	PrepareAux(AUX_PARTICLE_CELL_FLAG, num_pnts, sizeof(unsigned int), false, false);
 	PrepareAux(AUX_PARTICLE_BRICK_FLAG, num_pnts, sizeof(unsigned int), false, false);
+	PrepareAux(AUX_BRICK_FLAG_OFFSETS, num_pnts, sizeof(unsigned int), false, false); // Number of bricks might be much smaller than number of particles, but never more
 
 	void *fillParticleCellSortKeysArgs[7] = {
 		&num_pnts,
@@ -6266,6 +6269,17 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 
 	cudppScan(mPlan_particleScan, (void*) mAux[AUX_PARTICLE_SORT_KEYS].gpu,
 		(void*) mAux[AUX_PARTICLE_BRICK_FLAG].gpu, num_pnts);
+
+	void *computeBrickFlagOffsetsArgs[4] = {
+		&num_pnts,
+		&mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+		&mAux[AUX_PARTICLE_BRICK_FLAG].gpu,
+		&mAux[AUX_BRICK_FLAG_OFFSETS].gpu
+	};
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_COMPUTE_BRICK_FLAG_OFFSETS], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, computeBrickFlagOffsetsArgs, NULL),
+		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_COMPUTE_BRICK_FLAG_OFFSETS", mbDebug
+	);
 
 	// TODO: calculate other aux info
 
