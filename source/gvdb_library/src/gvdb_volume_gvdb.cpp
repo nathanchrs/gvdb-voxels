@@ -2568,14 +2568,14 @@ void VolumeGVDB::Initialize ()
 	config.op = CUDPP_MAX;
 
 	// TODO: this is dependent on the maximum number of particles
-	int maxNum = 1000000;	// TODO: no hard code later
+	int maxNum = 10000000;	// TODO: no hard code later
 
 	result = cudppPlan(mCudpp, &mPlan_max, config, maxNum, 1, 0);
-	if(result != CUDPP_SUCCESS) printf("Error in max plan creation (error code: %d).\n", result);
+	if (result != CUDPP_SUCCESS) printf("Error in max plan creation (error code: %d).\n", result);
 
 	config.op = CUDPP_MIN;
 	result = cudppPlan(mCudpp, &mPlan_min, config, maxNum, 1, 0);
-	if(result != CUDPP_SUCCESS) printf("Error in min plan creation (error code: %d).\n", result);
+	if (result != CUDPP_SUCCESS) printf("Error in min plan creation (error code: %d).\n", result);
 
 	CUDPPConfiguration config_sort;
 	config_sort.algorithm = CUDPP_SORT_RADIX;
@@ -2583,15 +2583,24 @@ void VolumeGVDB::Initialize ()
 	config_sort.options = CUDPP_OPTION_KEYS_ONLY;
 
 	result = cudppPlan(mCudpp, &mPlan_sort, config_sort, maxNum, 1, 0);
-	if(result != CUDPP_SUCCESS) printf("Error in brick sort plan creation (error code: %d).\n", result);
+	if (result != CUDPP_SUCCESS) printf("Error in brick sort plan creation (error code: %d).\n", result);
 
-	CUDPPConfiguration config_scatterReduceParticleSort;
-	config_scatterReduceParticleSort.algorithm = CUDPP_SORT_RADIX;
-	config_scatterReduceParticleSort.datatype = CUDPP_UINT;
-	config_scatterReduceParticleSort.options = CUDPP_OPTION_KEY_VALUE_PAIRS;
+	CUDPPConfiguration config_particleSort;
+	config_particleSort.algorithm = CUDPP_SORT_RADIX;
+	config_particleSort.datatype = CUDPP_UINT;
+	config_particleSort.options = CUDPP_OPTION_KEY_VALUE_PAIRS;
 
-	result = cudppPlan(mCudpp, &mPlan_scatterReduceParticleSort, config_scatterReduceParticleSort, maxNum, 1, 0);
-	if(result != CUDPP_SUCCESS) printf("Error in scatterReduceParticleSort plan creation (error code: %d).\n", result);
+	result = cudppPlan(mCudpp, &mPlan_particleSort, config_particleSort, maxNum, 1, 0);
+	if (result != CUDPP_SUCCESS) printf("Error in particleSort plan creation (error code: %d).\n", result);
+
+	CUDPPConfiguration config_particleScan;
+	config_particleScan.algorithm = CUDPP_SCAN;
+	config_particleScan.datatype = CUDPP_UINT;
+	config_particleScan.op = CUDPP_ADD;
+	config_particleScan.options = CUDPP_OPTION_INCLUSIVE;
+
+	result = cudppPlan(mCudpp, &mPlan_particleScan, config_particleScan, maxNum, 1, 0);
+	if (result != CUDPP_SUCCESS) printf("Error in particleScan plan creation (error code: %d).\n", result);
 
 	mRebuildTopo = true;
 	mCurrDepth = -1;
@@ -6179,8 +6188,7 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 	PUSH_CTX
 	PERF_PUSH("ScatterReduceLevelSet");
 
-	// Sort particles based on brick and cell position
-	PERF_PUSH("ScatterReduceLevelSet_SortAndMarkFlag");
+	PERF_PUSH("ScatterReduceLevelSet_Prepare");
 
 	if (mAux[AUX_SORTED_PARTICLE_INDEX].lastEle < num_pnts) {
 		PrepareAux(AUX_SORTED_PARTICLE_INDEX, num_pnts, sizeof(unsigned int), false, false);
@@ -6214,7 +6222,7 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_FILL_PARTICLE_CELL_SORT_KEYS", mbDebug
 	);
 
-	cudppRadixSort(mPlan_scatterReduceParticleSort, (void*) mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+	cudppRadixSort(mPlan_particleSort, (void*) mAux[AUX_PARTICLE_SORT_KEYS].gpu,
 		(void*) mAux[AUX_SORTED_PARTICLE_INDEX].gpu, num_pnts);
 
 	void *markParticleCellFlagArgs[3] = {
@@ -6243,7 +6251,7 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_FILL_PARTICLE_BRICK_SORT_KEYS", mbDebug
 	);
 
-	cudppRadixSort(mPlan_scatterReduceParticleSort, (void*) mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+	cudppRadixSort(mPlan_particleSort, (void*) mAux[AUX_PARTICLE_SORT_KEYS].gpu,
 		(void*) mAux[AUX_SORTED_PARTICLE_INDEX].gpu, num_pnts);
 
 	void *markParticleBrickFlagArgs[3] = {
@@ -6256,11 +6264,12 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_MARK_PARTICLE_FLAG", mbDebug
 	);
 
-	PERF_POP();
-
-
+	cudppScan(mPlan_particleScan, (void*) mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+		(void*) mAux[AUX_PARTICLE_BRICK_FLAG].gpu, num_pnts);
 
 	// TODO: calculate other aux info
+
+	PERF_POP();
 
 	// Actual scattering
 	PERF_PUSH("ScatterReduceLevelSet_Scatter");

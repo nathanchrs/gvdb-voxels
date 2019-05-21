@@ -846,7 +846,8 @@
 			CUDPPHandle		mPlan_max;
 			CUDPPHandle		mPlan_min;
 			CUDPPHandle		mPlan_sort;
-			CUDPPHandle		mPlan_scatterReduceParticleSort;
+			CUDPPHandle		mPlan_particleSort;
+			CUDPPHandle		mPlan_particleScan;
 
 			// CUDA Device & Context
 			int				mDevSelect;
