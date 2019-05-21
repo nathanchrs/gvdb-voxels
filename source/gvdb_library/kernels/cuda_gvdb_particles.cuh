@@ -1521,7 +1521,7 @@ extern "C" __global__ void fillParticleIndex(int particleCount, uint* particleIn
 
 extern "C" __global__ void fillParticleCellSortKeys(
 	int particleCount, char* ppos, int pos_off, int pos_stride,
-	float3 minWorldPosition, float3 voxelDimension, uint brickWidth, uint* particleSortKeys)
+	float3 minWorldPosition, float3 voxelDimension, uint* particleSortKeys)
 {
 	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
 	if (idx < particleCount) {
@@ -1548,5 +1548,14 @@ extern "C" __global__ void fillParticleBrickSortKeys(
 		particleSortKeys[idx] = (__float2uint_rd(brickPosNormalized.x) & 0x3ff)
 			+ ((__float2uint_rd(brickPosNormalized.y) << 10) & (0x3ff << 10))
 			+ ((__float2uint_rd(brickPosNormalized.z) << 20) & (0x3ff << 20));
+	}
+}
+
+extern "C" __global__ void markParticleFlag(int particleCount, uint* particleSortKeys, uint* flag)
+{
+	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
+	if (idx < particleCount) {
+		// Mark flag as true on first index or if sort keys differ from the previous index
+		flag[idx] = (idx == 0 || particleSortKeys[idx - 1] != particleSortKeys[idx]);
 	}
 }

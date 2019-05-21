@@ -218,6 +218,8 @@ VolumeGVDB::VolumeGVDB ()
 
 	mAuxName[AUX_SORTED_PARTICLE_INDEX] = "SORTED_PARTICLE_INDEX";
 	mAuxName[AUX_PARTICLE_SORT_KEYS] = "PARTICLE_SORT_KEYS";
+	mAuxName[AUX_PARTICLE_CELL_FLAG] = "PARTICLE_CELL_FLAG";
+	mAuxName[AUX_PARTICLE_BRICK_FLAG] = "PARTICLE_BRICK_FLAG";
 }
 
 void VolumeGVDB::SetProfile ( bool bCPU, bool bGPU ) 
@@ -346,6 +348,7 @@ void VolumeGVDB::SetCudaDevice ( int devid, CUcontext ctx )
 	LoadFunction ( FUNC_FILL_PARTICLE_INDEX, "fillParticleIndex", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_FILL_PARTICLE_CELL_SORT_KEYS, "fillParticleCellSortKeys", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_FILL_PARTICLE_BRICK_SORT_KEYS, "fillParticleBrickSortKeys", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
+	LoadFunction ( FUNC_MARK_PARTICLE_FLAG, "markParticleFlag", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 
 	SetModule ( cuModule[MODL_PRIMARY] );
 
@@ -6177,7 +6180,7 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 	PERF_PUSH("ScatterReduceLevelSet");
 
 	// Sort particles based on brick and cell position
-	PERF_PUSH("ScatterReduceLevelSet_Sort");
+	PERF_PUSH("ScatterReduceLevelSet_SortAndMarkFlag");
 
 	if (mAux[AUX_SORTED_PARTICLE_INDEX].lastEle < num_pnts) {
 		PrepareAux(AUX_SORTED_PARTICLE_INDEX, num_pnts, sizeof(unsigned int), false, false);
@@ -6194,9 +6197,38 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 	}
 
 	PrepareAux(AUX_PARTICLE_SORT_KEYS, num_pnts, sizeof(unsigned int), false, false);
+	PrepareAux(AUX_PARTICLE_CELL_FLAG, num_pnts, sizeof(unsigned int), false, false);
+	PrepareAux(AUX_PARTICLE_BRICK_FLAG, num_pnts, sizeof(unsigned int), false, false);
+
+	void *fillParticleCellSortKeysArgs[7] = {
+		&num_pnts,
+		&mAux[AUX_PNTPOS].gpu,
+		&mAux[AUX_PNTPOS].subdim.x,
+		&mAux[AUX_PNTPOS].stride,
+		&mPosMin.x,
+		&mVDBInfo.vdel[0].x,
+		&mAux[AUX_PARTICLE_SORT_KEYS].gpu
+	};
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_FILL_PARTICLE_CELL_SORT_KEYS], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, fillParticleCellSortKeysArgs, NULL),
+		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_FILL_PARTICLE_CELL_SORT_KEYS", mbDebug
+	);
+
+	cudppRadixSort(mPlan_scatterReduceParticleSort, (void*) mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+		(void*) mAux[AUX_SORTED_PARTICLE_INDEX].gpu, num_pnts);
+
+	void *markParticleCellFlagArgs[3] = {
+		&num_pnts,
+		&mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+		&mAux[AUX_PARTICLE_CELL_FLAG].gpu
+	};
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_MARK_PARTICLE_FLAG], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, markParticleCellFlagArgs, NULL),
+		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_MARK_PARTICLE_FLAG", mbDebug
+	);
 
 	uint brickWidth = mPool->getAtlasBrickres(chanLevelSet);
-	void *fillParticleSortKeysArgs[8] = {
+	void *fillParticleBrickSortKeysArgs[8] = {
 		&num_pnts,
 		&mAux[AUX_PNTPOS].gpu,
 		&mAux[AUX_PNTPOS].subdim.x,
@@ -6206,24 +6238,27 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 		&brickWidth,
 		&mAux[AUX_PARTICLE_SORT_KEYS].gpu
 	};
-
 	cudaCheck(
-		cuLaunchKernel(cuFunc[FUNC_FILL_PARTICLE_CELL_SORT_KEYS], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, fillParticleSortKeysArgs, NULL),
-		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_FILL_PARTICLE_CELL_SORT_KEYS", mbDebug
-	);
-
-	cudppRadixSort(mPlan_scatterReduceParticleSort, (void*) mAux[AUX_PARTICLE_SORT_KEYS].gpu,
-		(void*) mAux[AUX_SORTED_PARTICLE_INDEX].gpu, num_pnts);
-
-	cudaCheck(
-		cuLaunchKernel(cuFunc[FUNC_FILL_PARTICLE_BRICK_SORT_KEYS], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, fillParticleSortKeysArgs, NULL),
+		cuLaunchKernel(cuFunc[FUNC_FILL_PARTICLE_BRICK_SORT_KEYS], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, fillParticleBrickSortKeysArgs, NULL),
 		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_FILL_PARTICLE_BRICK_SORT_KEYS", mbDebug
 	);
 
 	cudppRadixSort(mPlan_scatterReduceParticleSort, (void*) mAux[AUX_PARTICLE_SORT_KEYS].gpu,
 		(void*) mAux[AUX_SORTED_PARTICLE_INDEX].gpu, num_pnts);
 
+	void *markParticleBrickFlagArgs[3] = {
+		&num_pnts,
+		&mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+		&mAux[AUX_PARTICLE_BRICK_FLAG].gpu
+	};
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_MARK_PARTICLE_FLAG], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, markParticleBrickFlagArgs, NULL),
+		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_MARK_PARTICLE_FLAG", mbDebug
+	);
+
 	PERF_POP();
+
+
 
 	// TODO: calculate other aux info
 
