@@ -351,6 +351,7 @@ void VolumeGVDB::SetCudaDevice ( int devid, CUcontext ctx )
 	LoadFunction ( FUNC_FILL_PARTICLE_BRICK_SORT_KEYS, "fillParticleBrickSortKeys", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_MARK_PARTICLE_FLAG, "markParticleFlag", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_COMPUTE_BRICK_FLAG_OFFSETS, "computeBrickFlagOffsets", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
+	LoadFunction ( FUNC_MARK_PARTICLE_BLOCK_FLAG, "markParticleBlockFlag", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 
 	SetModule ( cuModule[MODL_PRIMARY] );
 
@@ -6279,6 +6280,20 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 	cudaCheck(
 		cuLaunchKernel(cuFunc[FUNC_COMPUTE_BRICK_FLAG_OFFSETS], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, computeBrickFlagOffsetsArgs, NULL),
 		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_COMPUTE_BRICK_FLAG_OFFSETS", mbDebug
+	);
+
+	uint maxBlockParticleCount = blockSize;
+	void *markParticleBlockFlagArgs[6] = {
+		&num_pnts,
+		&maxBlockParticleCount,
+		&mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+		&mAux[AUX_BRICK_FLAG_OFFSETS].gpu,
+		&mAux[AUX_PARTICLE_CELL_FLAG].gpu,
+		&mAux[AUX_PARTICLE_BRICK_FLAG].gpu
+	};
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_MARK_PARTICLE_BLOCK_FLAG], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, markParticleBlockFlagArgs, NULL),
+		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_MARK_PARTICLE_BLOCK_FLAG", mbDebug
 	);
 
 	// TODO: calculate other aux info

@@ -1567,3 +1567,19 @@ extern "C" __global__ void computeBrickFlagOffsets(int particleCount, uint* bric
 		brickFlagOffsets[brickNumbers[idx] - 1] = idx; // Brick numbers start from 1
 	}
 }
+
+// If a brick contains more than maxBlockParticleCount particles, it will be split to multiple blocks.
+// This function marks cell and brick change flags with additional marks where a brick is split.
+// With the additional marks, brickFlag becomes block change flags.
+extern "C" __global__ void markParticleBlockFlag(
+	int particleCount, uint maxBlockParticleCount, uint* brickNumbers, uint* brickFlagOffsets,
+	uint* cellFlag, uint* brickFlag)
+{
+	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
+	if (idx < particleCount) {
+		if ((idx - brickFlagOffsets[brickNumbers[idx] - 1]) % maxBlockParticleCount == 0) {
+			cellFlag[idx] = 1;
+			brickFlag[idx] = 1;
+		}
+	}
+}
