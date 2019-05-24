@@ -1583,3 +1583,20 @@ extern "C" __global__ void markParticleBlockFlag(
 		}
 	}
 }
+
+extern "C" __global__ void computeParticleNegatedBlockFlag(int particleCount, uint* blockFlag, uint* negatedBlockFlag)
+{
+	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
+	if (idx < particleCount) {
+		negatedBlockFlag[idx] = !blockFlag[idx];
+	}
+}
+
+extern "C" __global__ void computeParticleThreadIndex(
+	int particleCount, uint maxBlockParticleCount, uint* particleBlockNumbers, uint* particleIndexInBlock)
+{
+	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
+	if (idx < particleCount) {
+		particleIndexInBlock[idx] += ((particleBlockNumbers[idx] - 1) * maxBlockParticleCount);
+	}
+}

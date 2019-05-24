@@ -245,6 +245,8 @@
 	#define FUNC_MARK_PARTICLE_FLAG 155
 	#define FUNC_COMPUTE_BRICK_FLAG_OFFSETS 156
 	#define FUNC_MARK_PARTICLE_BLOCK_FLAG 157
+	#define FUNC_COMPUTE_PARTICLE_NEGATED_BLOCK_FLAG 158
+	#define FUNC_COMPUTE_PARTICLE_THREAD_INDEX 159
 
 	#define MAX_FUNC				255
 
@@ -851,6 +853,7 @@
 			CUDPPHandle		mPlan_sort;
 			CUDPPHandle		mPlan_particleSort;
 			CUDPPHandle		mPlan_particleScan;
+			CUDPPHandle		mPlan_particleSegmentedScan;
 
 			// CUDA Device & Context
 			int				mDevSelect;
