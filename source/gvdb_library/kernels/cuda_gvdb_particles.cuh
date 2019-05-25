@@ -628,7 +628,7 @@ extern "C" __global__ void gvdbScatterPointDensity (VDBInfo* gvdb, int num_pnts,
 inline __device__ void writeMinFloatToAtlas(VDBInfo* gvdb, int channel, int3 cellIndexInAtlas, float value) {
 	if (gvdb->use_tex_mem[channel]) {
 		// WARNING: non-atomic operation as textures doesn't support atomics - might cause write conflict
-		float prevValue = tex3D<float>(gvdb->volIn[channel], cellIndexInAtlas.x, cellIndexInAtlas.y, cellIndexInAtlas.z);
+		float prevValue = tex3D<float>(gvdb->volIn[channel], cellIndexInAtlas.x + 0.5f, cellIndexInAtlas.y + 0.5f, cellIndexInAtlas.z + 0.5f);
 		surf3Dwrite(min(prevValue, value), gvdb->volOut[channel], cellIndexInAtlas.x * sizeof(float), cellIndexInAtlas.y, cellIndexInAtlas.z);
 	} else {
 		int3 atlasSize = gvdb->atlas_res;
@@ -1520,34 +1520,54 @@ extern "C" __global__ void fillParticleIndex(int particleCount, uint* particleIn
 }
 
 extern "C" __global__ void fillParticleCellSortKeys(
-	int particleCount, char* ppos, int pos_off, int pos_stride,
-	float3 minWorldPosition, float3 voxelDimension, uint* particleSortKeys)
+	VDBInfo* gvdb, int particleCount, char* ppos, int pos_off, int pos_stride, uint* particleSortKeys)
 {
 	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
 	if (idx < particleCount) {
 		float3 particlePosInWorld = *(float3*) (ppos + idx*pos_stride + pos_off);
-		float3 cellPosNormalized = (particlePosInWorld - minWorldPosition) / voxelDimension;
+
+		// Get GVDB node at the particle point
+		float3 setPosInWorld = particlePosInWorld + make_float3(0.5, 0.5, 0.5)*gvdb->vdel[0];
+		float3 offs, brickPosInWorld, vdel;
+		uint64 nodeId;
+		VDBNode* node = getNodeAtPoint(gvdb, setPosInWorld, &offs, &brickPosInWorld, &vdel, &nodeId);
+		if (node == 0x0) {
+			return; // If no brick at location, return
+		}
+
+		int3 brickIndexInAtlas = make_int3(node->mValue);
+		float3 setPosInBrick = (setPosInWorld - brickPosInWorld);
+		int3 cellIndexInBrick = make_int3(setPosInBrick / gvdb->vdel[0]);
+		uint3 cellIndexInAtlas = make_uint3(brickIndexInAtlas + cellIndexInBrick);
 
 		// Each dimension is represented as 10 bits
-		particleSortKeys[idx] = (__float2uint_rd(cellPosNormalized.x) & 0x3ff)
-			+ ((__float2uint_rd(cellPosNormalized.y) << 10) & (0x3ff << 10))
-			+ ((__float2uint_rd(cellPosNormalized.z) << 20) & (0x3ff << 20));
+		particleSortKeys[idx] = (cellIndexInAtlas.x & 0x3ff)
+			+ ((cellIndexInAtlas.y << 10) & (0x3ff << 10))
+			+ ((cellIndexInAtlas.z << 20) & (0x3ff << 20));
 	}
 }
 
 extern "C" __global__ void fillParticleBrickSortKeys(
-	int particleCount, char* ppos, int pos_off, int pos_stride,
-	float3 minWorldPosition, float3 voxelDimension, uint brickWidth, uint* particleSortKeys)
+	VDBInfo* gvdb, int particleCount, char* ppos, int pos_off, int pos_stride, uint brickWidth, uint* particleSortKeys)
 {
 	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
 	if (idx < particleCount) {
 		float3 particlePosInWorld = *(float3*) (ppos + idx*pos_stride + pos_off);
-		float3 brickPosNormalized = (particlePosInWorld - minWorldPosition) / (voxelDimension * brickWidth);
+
+		// Get GVDB node at the particle point
+		float3 setPosInWorld = particlePosInWorld + make_float3(0.5, 0.5, 0.5)*gvdb->vdel[0];
+		float3 offs, brickPosInWorld, vdel;
+		uint64 nodeId;
+		VDBNode* node = getNodeAtPoint(gvdb, setPosInWorld, &offs, &brickPosInWorld, &vdel, &nodeId);
+		if (node == 0x0) {
+			return; // If no brick at location, return
+		}
+		uint3 brickIndexInAtlas = make_uint3(node->mValue);
 
 		// Each dimension is represented as 10 bits
-		particleSortKeys[idx] = (__float2uint_rd(brickPosNormalized.x) & 0x3ff)
-			+ ((__float2uint_rd(brickPosNormalized.y) << 10) & (0x3ff << 10))
-			+ ((__float2uint_rd(brickPosNormalized.z) << 20) & (0x3ff << 20));
+		particleSortKeys[idx] = (brickIndexInAtlas.x & 0x3ff)
+			+ ((brickIndexInAtlas.y << 10) & (0x3ff << 10))
+			+ ((brickIndexInAtlas.z << 20) & (0x3ff << 20));
 	}
 }
 
