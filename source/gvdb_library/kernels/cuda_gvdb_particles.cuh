@@ -717,15 +717,31 @@ extern "C" __global__ void gvdbScatterLevelSet(
 }
 
 extern "C" __global__ void gvdbScatterReduceLevelSet(
-	VDBInfo* gvdb, int num_pnts, float radius,
+	VDBInfo* gvdb, int num_pnts, uint num_threads, float radius,
 	char* ppos, int pos_off, int pos_stride,
-	uint* sortedParticleIndex,
+	uint* particleThreadIndex, uint* sortedParticleIndex,
 	float3 ptrans, int chanLevelSet)
 {
     uint i = blockIdx.x * blockDim.x + threadIdx.x;
-	if (i >= num_pnts) return;
+	if (i >= num_threads) return;
 
-	float3 particlePosInWorld = (*(float3*) (ppos + sortedParticleIndex[i]*pos_stride + pos_off));
+	// Binary search particle index for the current thread index
+	uint left = 0;
+	uint right = num_pnts - 1;
+	uint mid;
+	while (right > left) {
+		mid = left + (right - left) / 2;
+		if (particleThreadIndex[mid] >= i) {
+			right = mid;
+		} else {
+			left = mid + 1;
+		}
+	}
+	if (particleThreadIndex[right] != i) {
+		return; // The current thread is not assigned to any particle
+	}
+
+	float3 particlePosInWorld = (*(float3*) (ppos + sortedParticleIndex[right]*pos_stride + pos_off));
 	if ( particlePosInWorld.z == NOHIT ) { return; } // If position invalid, return
 	particlePosInWorld += ptrans;
 

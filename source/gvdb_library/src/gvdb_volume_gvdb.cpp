@@ -6329,25 +6329,36 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_COMPUTE_PARTICLE_THREAD_INDEX", mbDebug
 	);
 
+	uint scatterThreadCount;
+	uint* d_scatterThreadCount = ((uint*) mAux[AUX_PARTICLE_SORT_KEYS].gpu) + num_pnts - 1;
+	cudaCheck(cuMemcpyDtoH(&scatterThreadCount, (CUdeviceptr) d_scatterThreadCount, sizeof(uint)),
+		"VolumeGVDB", "ScatterReduceLevelSet", "cuMemcpyDtoH", "scatterThreadCount", mbDebug);
+	scatterThreadCount++;
+
 	PERF_POP();
+
+	printf("ScatterReduceLevelSet::scatterThreadCount: %d\n", scatterThreadCount); // DEBUG
 
 	// Actual scattering
 	PERF_PUSH("ScatterReduceLevelSet_Scatter");
 	PrepareVDB();
 
-	void *args[9] = {
+	int scatterGridSize = (scatterThreadCount + blockSize - 1) / blockSize;
+	void *scatterArgs[11] = {
 		&cuVDBInfo,
 		&num_pnts,
+		&scatterThreadCount,
 		&radius,
 		&mAux[AUX_PNTPOS].gpu,
 		&mAux[AUX_PNTPOS].subdim.x,
 		&mAux[AUX_PNTPOS].stride,
+		&mAux[AUX_PARTICLE_SORT_KEYS].gpu,
 		&mAux[AUX_SORTED_PARTICLE_INDEX].gpu,
 		&trans.x,
 		&chanLevelSet
 	};
 	cudaCheck(
-		cuLaunchKernel(cuFunc[FUNC_SCATTER_REDUCE_LEVEL_SET], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, args, NULL),
+		cuLaunchKernel(cuFunc[FUNC_SCATTER_REDUCE_LEVEL_SET], scatterGridSize, 1, 1, blockSize, 1, 1, 0, NULL, scatterArgs, NULL),
         "VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch",
         "FUNC_SCATTER_REDUCE_LEVEL_SET", mbDebug
 	);
