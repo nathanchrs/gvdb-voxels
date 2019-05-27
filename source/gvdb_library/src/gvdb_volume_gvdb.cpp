@@ -6196,7 +6196,7 @@ void VolumeGVDB::ScatterLevelSet(int num_pnts, float radius, Vector3DF trans, in
 }
 
 void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, int chanLevelSet) {
-	const int blockSize = 256;
+	const int blockSize = 256; // TODO: separate preparation blocksize with maxparticlecountperblock and scatter blocksize
   	const int gridSize = (num_pnts + blockSize - 1) / blockSize;
 	uint maxBlockParticleCount = blockSize;
 
@@ -6348,7 +6348,7 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 	PrepareVDB();
 
 	int scatterGridSize = (scatterThreadCount + blockSize - 1) / blockSize;
-	void *scatterArgs[11] = {
+	void *scatterArgs[12] = {
 		&cuVDBInfo,
 		&num_pnts,
 		&scatterThreadCount,
@@ -6358,6 +6358,7 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 		&mAux[AUX_PNTPOS].stride,
 		&mAux[AUX_PARTICLE_SORT_KEYS].gpu,
 		&mAux[AUX_SORTED_PARTICLE_INDEX].gpu,
+		&mAux[AUX_PARTICLE_CELL_FLAG].gpu,
 		&trans.x,
 		&chanLevelSet
 	};

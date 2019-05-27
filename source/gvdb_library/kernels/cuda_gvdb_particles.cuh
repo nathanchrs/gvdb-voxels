@@ -625,6 +625,16 @@ extern "C" __global__ void gvdbScatterPointDensity (VDBInfo* gvdb, int num_pnts,
 	}
 }
 
+inline __device__ void atomicMinF(float* address, float value) {
+	// https://stackoverflow.com/questions/17399119/cant-we-use-atomic-operations-for-floating-point-variables-in-cuda/51549250#51549250
+	// Hack to support float atomic min using integer operations
+	if (value >= 0) {
+		__int_as_float(atomicMin((int*) address, __float_as_int(value)));
+	} else {
+		__uint_as_float(atomicMax((unsigned int*) address, __float_as_uint(value)));
+	}
+}
+
 inline __device__ void writeMinFloatToAtlas(VDBInfo* gvdb, int channel, int3 cellIndexInAtlas, float value) {
 	if (gvdb->use_tex_mem[channel]) {
 		// WARNING: non-atomic operation as textures doesn't support atomics - might cause write conflict
@@ -636,13 +646,7 @@ inline __device__ void writeMinFloatToAtlas(VDBInfo* gvdb, int channel, int3 cel
 							cellIndexInAtlas.y * atlasSize.x + cellIndexInAtlas.x;
 		float* cell = (float*) (gvdb->atlas_dev_mem[channel]) + atlasIndex;
 
-		// https://stackoverflow.com/questions/17399119/cant-we-use-atomic-operations-for-floating-point-variables-in-cuda/51549250#51549250
-		// Hack to support float atomic min using integer operations
-		if (value >= 0) {
-			__int_as_float(atomicMin((int*) cell, __float_as_int(value)));
-		} else {
-			__uint_as_float(atomicMax((unsigned int*) cell, __float_as_uint(value)));
-		}
+		atomicMinF(cell, value);
 	}
 }
 
@@ -687,91 +691,134 @@ extern "C" __global__ void gvdbScatterLevelSet(
 	if ( particlePosInWorld.z == NOHIT ) { return; } // If position invalid, return
 	particlePosInWorld += ptrans;
 
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, -1, -1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, -1, 0));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, -1, 1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 0, -1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 0, 0));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 0, 1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 1, -1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 1, 0));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 1, 1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, -1, -1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, -1, 0));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, -1, 1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 0, -1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 0, 0));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 0, 1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 1, -1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 1, 0));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 1, 1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, -1, -1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, -1, 0));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, -1, 1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 0, -1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 0, 0));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 0, 1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 1, -1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 1, 0));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 1, 1));
+	for (int dx = -1; dx <= 1; dx++) {
+		for (int dy = -1; dy <= 1; dy++) {
+			for (int dz = -1; dz <= 1; dz++) {
+				setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(dx, dy, dz));
+			}
+		}
+	}
+}
+
+inline __device__ void shuffleLevelSetValue(
+	int3 particleCellIndexInBrick, float3 particlePosInCell, float3 cellDimension, int3 offset, float radius,
+	uint laneIndex, uint activeThreadsMask, uint cellFlagMask, float brickCache[10][10][10])
+{
+	float3 delta = (particlePosInCell - make_float3(offset));
+	float distance = norm3df(delta.x, delta.y, delta.z);
+
+	// TODO: implement warp shuffle (currently we use atomic min to shared memory)
+
+	int3 cellIndexInBrickCache = particleCellIndexInBrick + offset;
+	float* cell = &brickCache[cellIndexInBrickCache.z][cellIndexInBrickCache.y][cellIndexInBrickCache.x];
+	atomicMinF(cell, distance - radius);
 }
 
 extern "C" __global__ void gvdbScatterReduceLevelSet(
 	VDBInfo* gvdb, int num_pnts, uint num_threads, float radius,
 	char* ppos, int pos_off, int pos_stride,
-	uint* particleThreadIndex, uint* sortedParticleIndex,
+	uint* particleThreadIndex, uint* sortedParticleIndex, uint* particleCellFlag,
 	float3 ptrans, int chanLevelSet)
 {
-    uint i = blockIdx.x * blockDim.x + threadIdx.x;
-	if (i >= num_threads) return;
+	__shared__ float s_brickCache[10][10][10]; // Assumes 8x8x8 brick, with apron cells
+	__shared__ float3 s_brickPosInWorld;
+	__shared__ uint3 s_brickIndexInAtlas;
+	__shared__ float3 s_cellDimension;
+	__shared__ int3 s_atlasSize;
 
-	// Binary search particle index for the current thread index
-	uint left = 0;
-	uint right = num_pnts - 1;
-	uint mid;
-	while (right > left) {
-		mid = left + (right - left) / 2;
-		if (particleThreadIndex[mid] >= i) {
-			right = mid;
-		} else {
-			left = mid + 1;
+	float3 particlePosInWorld;
+
+	uint i = blockIdx.x * blockDim.x + threadIdx.x;
+	uint laneIndex = threadIdx.x & 0x1f;
+	bool isCurrentThreadActive = false;
+	bool isCurrentThreadFirstInCell = false;
+
+	// Initialize brickCache with max_float
+	for (uint threadOffset = 0; threadOffset < 10*10*10; threadOffset += blockDim.x) {
+		uint j = threadOffset + threadIdx.x;
+		if (j < 10*10*10) {
+			*((float*) s_brickCache + j) = 3.0f; // TODO: find proper max float
 		}
 	}
-	if (particleThreadIndex[right] != i) {
-		return; // The current thread is not assigned to any particle
+
+	// Load particle data and mark active threads
+	if (i < num_threads) {
+		// Binary search particle index for the current thread index
+		uint left = 0;
+		uint right = num_pnts - 1;
+		uint mid;
+		while (right > left) {
+			mid = left + (right - left) / 2;
+			if (particleThreadIndex[mid] >= i) {
+				right = mid;
+			} else {
+				left = mid + 1;
+			}
+		}
+
+		if (particleThreadIndex[right] == i) { // Thread is assigned to a particle
+			particlePosInWorld = (*(float3*) (ppos + sortedParticleIndex[right]*pos_stride + pos_off)) + ptrans;
+
+			isCurrentThreadActive = true;
+			isCurrentThreadFirstInCell = particleCellFlag[right];
+
+			// Since we can assume that a block will only handle 1 brick,
+			// only the first thread in each block needs to find the brick.
+			if (threadIdx.x == 0) {
+				float3 cellDimension = gvdb->vdel[0];
+				float3 setPosInWorld = particlePosInWorld + (make_float3(0.5, 0.5, 0.5) * cellDimension);
+				float3 offs, vdel;
+				uint64 nodeId;
+				VDBNode* node = getNodeAtPoint(gvdb, setPosInWorld, &offs, &s_brickPosInWorld, &vdel, &nodeId);
+				s_brickIndexInAtlas = make_uint3(node->mValue);
+				s_cellDimension = cellDimension;
+				s_atlasSize = gvdb->atlas_res;
+			}
+		}
 	}
 
-	float3 particlePosInWorld = (*(float3*) (ppos + sortedParticleIndex[right]*pos_stride + pos_off));
-	if ( particlePosInWorld.z == NOHIT ) { return; } // If position invalid, return
-	particlePosInWorld += ptrans;
+	uint activeThreadsMask = __ballot_sync(0xffffffff, isCurrentThreadActive);
+	uint cellFlagMask = __ballot_sync(activeThreadsMask, isCurrentThreadFirstInCell);
 
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, -1, -1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, -1, 0));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, -1, 1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 0, -1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 0, 0));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 0, 1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 1, -1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 1, 0));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(-1, 1, 1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, -1, -1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, -1, 0));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, -1, 1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 0, -1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 0, 0));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 0, 1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 1, -1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 1, 0));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(0, 1, 1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, -1, -1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, -1, 0));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, -1, 1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 0, -1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 0, 0));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 0, 1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 1, -1));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 1, 0));
-	setLevelSetValue(gvdb, chanLevelSet, radius, particlePosInWorld, make_float3(1, 1, 1));
+	__syncthreads();
+
+	// Only shuffle between active threads
+	if (activeThreadsMask & (1 << laneIndex)) {
+		float3 setPosInWorld = particlePosInWorld + (make_float3(0.5, 0.5, 0.5) * s_cellDimension);
+		float3 setPosInBrick = (setPosInWorld - s_brickPosInWorld);
+		int3 particleCellIndexInBrick = make_int3(setPosInBrick / s_cellDimension);
+		float3 particleCellPosInWorld = make_float3(particleCellIndexInBrick) * s_cellDimension + s_brickPosInWorld;
+		float3 particlePosInCell = (particlePosInWorld - particleCellPosInWorld);
+
+		for (int dx = 0; dx <= 0; dx++) {
+			for (int dy = 0; dy <= 0; dy++) {
+				for (int dz = 0; dz <= 0; dz++) { // DEBUG: gather also limited in range to 0.5*vdel
+
+					shuffleLevelSetValue(
+						particleCellIndexInBrick, particlePosInCell, s_cellDimension, make_int3(dx, dy, dz), radius,
+						laneIndex, activeThreadsMask, cellFlagMask, s_brickCache
+					);
+				}
+			}
+		}
+	}
+
+	__syncthreads();
+
+	// TODO: find node for apron too
+	// Atomic write brickCache contents to the atlas
+	for (uint threadOffset = 0; threadOffset < 10*10*10; threadOffset += blockDim.x) {
+		uint j = threadOffset + threadIdx.x;
+		if (j < 10*10*10) {
+			uint3 cellIndexInBrick = make_uint3(j % 10, (j / 10) % 10, j / 100);
+			uint3 cellIndexInAtlas = s_brickIndexInAtlas + cellIndexInBrick;
+			unsigned long int atlasIndex = cellIndexInAtlas.z * s_atlasSize.x * s_atlasSize.y +
+							cellIndexInAtlas.y * s_atlasSize.x + cellIndexInAtlas.x;
+
+			float* atlasAddress = (float*) gvdb->atlas_dev_mem[chanLevelSet] + atlasIndex;
+			atomicMinF(atlasAddress, s_brickCache[cellIndexInBrick.z][cellIndexInBrick.y][cellIndexInBrick.x]);
+		}
+	}
 }
 
 extern "C" __global__ void gvdbAddSupportVoxel (VDBInfo* gvdb, int num_pnts,  float radius, float offset, float amp,
