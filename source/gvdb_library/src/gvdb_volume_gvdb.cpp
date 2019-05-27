@@ -6224,13 +6224,15 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 	PrepareAux(AUX_PARTICLE_BRICK_FLAG, num_pnts, sizeof(unsigned int), false, false);
 	PrepareAux(AUX_BRICK_FLAG_OFFSETS, num_pnts, sizeof(unsigned int), false, false);
 
-	void *fillParticleCellSortKeysArgs[6] = {
+	void *fillParticleCellSortKeysArgs[7] = {
 		&cuVDBInfo,
 		&num_pnts,
 		&mAux[AUX_PNTPOS].gpu,
 		&mAux[AUX_PNTPOS].subdim.x,
 		&mAux[AUX_PNTPOS].stride,
-		&mAux[AUX_PARTICLE_SORT_KEYS].gpu};
+		&mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+		&mAux[AUX_SORTED_PARTICLE_INDEX].gpu
+	};
 	cudaCheck(
 		cuLaunchKernel(cuFunc[FUNC_FILL_PARTICLE_CELL_SORT_KEYS], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, fillParticleCellSortKeysArgs, NULL),
 		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_FILL_PARTICLE_CELL_SORT_KEYS", mbDebug
@@ -6250,14 +6252,16 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 	);
 
 	uint brickWidth = mPool->getAtlasBrickres(chanLevelSet);
-	void *fillParticleBrickSortKeysArgs[7] = {
+	void *fillParticleBrickSortKeysArgs[8] = {
 		&cuVDBInfo,
 		&num_pnts,
 		&mAux[AUX_PNTPOS].gpu,
 		&mAux[AUX_PNTPOS].subdim.x,
 		&mAux[AUX_PNTPOS].stride,
 		&brickWidth,
-		&mAux[AUX_PARTICLE_SORT_KEYS].gpu};
+		&mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+		&mAux[AUX_SORTED_PARTICLE_INDEX].gpu
+	};
 	cudaCheck(
 		cuLaunchKernel(cuFunc[FUNC_FILL_PARTICLE_BRICK_SORT_KEYS], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, fillParticleBrickSortKeysArgs, NULL),
 		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_FILL_PARTICLE_BRICK_SORT_KEYS", mbDebug

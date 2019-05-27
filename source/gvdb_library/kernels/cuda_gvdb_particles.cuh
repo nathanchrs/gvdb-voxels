@@ -1536,11 +1536,11 @@ extern "C" __global__ void fillParticleIndex(int particleCount, uint* particleIn
 }
 
 extern "C" __global__ void fillParticleCellSortKeys(
-	VDBInfo* gvdb, int particleCount, char* ppos, int pos_off, int pos_stride, uint* particleSortKeys)
+	VDBInfo* gvdb, int particleCount, char* ppos, int pos_off, int pos_stride, uint* particleSortKeys, uint* sortedParticleIndex)
 {
 	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
 	if (idx < particleCount) {
-		float3 particlePosInWorld = *(float3*) (ppos + idx*pos_stride + pos_off);
+		float3 particlePosInWorld = *(float3*) (ppos + sortedParticleIndex[idx]*pos_stride + pos_off);
 
 		// Get GVDB node at the particle point
 		float3 setPosInWorld = particlePosInWorld + make_float3(0.5, 0.5, 0.5)*gvdb->vdel[0];
@@ -1564,11 +1564,11 @@ extern "C" __global__ void fillParticleCellSortKeys(
 }
 
 extern "C" __global__ void fillParticleBrickSortKeys(
-	VDBInfo* gvdb, int particleCount, char* ppos, int pos_off, int pos_stride, uint brickWidth, uint* particleSortKeys)
+	VDBInfo* gvdb, int particleCount, char* ppos, int pos_off, int pos_stride, uint brickWidth, uint* particleSortKeys, uint* sortedParticleIndex)
 {
 	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
 	if (idx < particleCount) {
-		float3 particlePosInWorld = *(float3*) (ppos + idx*pos_stride + pos_off);
+		float3 particlePosInWorld = *(float3*) (ppos + sortedParticleIndex[idx]*pos_stride + pos_off);
 
 		// Get GVDB node at the particle point
 		float3 setPosInWorld = particlePosInWorld + make_float3(0.5, 0.5, 0.5)*gvdb->vdel[0];
