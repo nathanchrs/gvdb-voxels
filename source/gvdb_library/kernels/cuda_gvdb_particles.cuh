@@ -451,7 +451,7 @@ extern "C" __global__ void gvdbCalcIncreExtraBrickId (VDBInfo* gvdb, float radiu
 
 	int3 ndPos;
 	int pnodeId, idx;
-	VDBNode* node;
+	// VDBNode* node;
 	//unsigned short levxyx[40];
 	//int ndCnt = 0;
 
@@ -700,11 +700,12 @@ extern "C" __global__ void gvdbScatterLevelSet(
 	}
 }
 
+// particleCellIndexInBrick is relative to brick corner including apron
 inline __device__ void shuffleLevelSetValue(
 	int3 particleCellIndexInBrick, float3 particlePosInCell, float3 cellDimension, int3 offset, float radius,
 	uint laneIndex, uint activeThreadsMask, uint cellFlagMask, float brickCache[10][10][10])
 {
-	float3 delta = (particlePosInCell - make_float3(offset));
+	float3 delta = particlePosInCell - (make_float3(offset) * cellDimension);
 	float distance = norm3df(delta.x, delta.y, delta.z);
 
 	// TODO: implement warp shuffle (currently we use atomic min to shared memory)
@@ -718,13 +719,13 @@ extern "C" __global__ void gvdbScatterReduceLevelSet(
 	VDBInfo* gvdb, int num_pnts, uint num_threads, float radius,
 	char* ppos, int pos_off, int pos_stride,
 	uint* particleThreadIndex, uint* sortedParticleIndex, uint* particleCellFlag,
+	float3 cellDimension, int brickWidthInVoxels, int3 atlasSize,
 	float3 ptrans, int chanLevelSet)
 {
 	__shared__ float s_brickCache[10][10][10]; // Assumes 8x8x8 brick, with apron cells
-	__shared__ float3 s_brickPosInWorld;
-	__shared__ uint3 s_brickIndexInAtlas;
-	__shared__ float3 s_cellDimension;
-	__shared__ int3 s_atlasSize;
+	__shared__ float3 s_firstParticlePosInWorld;
+	__shared__ float3 s_particleBrickPosInWorld;
+	__shared__ uint3 s_brickIndexInAtlas[3][3][3];
 
 	float3 particlePosInWorld;
 
@@ -762,17 +763,43 @@ extern "C" __global__ void gvdbScatterReduceLevelSet(
 			isCurrentThreadActive = true;
 			isCurrentThreadFirstInCell = particleCellFlag[right];
 
-			// Since we can assume that a block will only handle 1 brick,
-			// only the first thread in each block needs to find the brick.
 			if (threadIdx.x == 0) {
-				float3 cellDimension = gvdb->vdel[0];
-				float3 setPosInWorld = particlePosInWorld + (make_float3(0.5, 0.5, 0.5) * cellDimension);
-				float3 offs, vdel;
-				uint64 nodeId;
-				VDBNode* node = getNodeAtPoint(gvdb, setPosInWorld, &offs, &s_brickPosInWorld, &vdel, &nodeId);
-				s_brickIndexInAtlas = make_uint3(node->mValue);
-				s_cellDimension = cellDimension;
-				s_atlasSize = gvdb->atlas_res;
+				s_firstParticlePosInWorld = particlePosInWorld;
+			}
+		}
+	}
+
+	__syncthreads();
+
+	// Locate bricks for the current brick and its neighbors
+	for (uint threadOffset = 0; threadOffset < 3*3*3; threadOffset += blockDim.x) {
+		uint j = threadOffset + threadIdx.x;
+		if (j < 3*3*3) {
+			int3 brickIndex = make_int3(j % 3, (j / 3) % 3, j / 9);
+			float3 relativeBrickOffset = make_float3(brickIndex - make_int3(1.0, 1.0, 1.0));
+
+			float3 setPosInWorld = s_firstParticlePosInWorld +
+				cellDimension * (relativeBrickOffset * brickWidthInVoxels + make_float3(0.5, 0.5, 0.5));
+
+			float3 particleBrickPosInWorld, offs, vdel;
+			uint64 nodeId;
+			VDBNode* node = getNodeAtPoint(gvdb, setPosInWorld, &offs, &particleBrickPosInWorld, &vdel, &nodeId);
+			particleBrickPosInWorld -= make_float3(1.0, 1.0, 1.0); // The position returned by getNodeAtPoint excludes brick aprons
+			if (node) {
+				s_brickIndexInAtlas[brickIndex.z][brickIndex.y][brickIndex.x] = make_uint3(node->mValue) - make_uint3(1, 1, 1);
+			} else {
+				s_brickIndexInAtlas[brickIndex.z][brickIndex.y][brickIndex.x] = make_uint3(0xffffffff, 0xffffffff, 0xffffffff);
+				printf(
+					"WARNING: scatterReduceLevelSet: invalid node at setPosInWorld %f, %f, %f - relativeBrickOffset %f, %f, %f\n",
+					setPosInWorld.x, setPosInWorld.y, setPosInWorld.z,
+					relativeBrickOffset.x, relativeBrickOffset.y, relativeBrickOffset.z
+				);
+				// TODO: this happens because gvdb only adds 6 adjacent cells as apron (diagonal neighbors are not added)
+				// The fix is to add all 26 neighbor cells when allocating bricks
+				// This will also fix gather
+			}
+			if (j == 13) { // Thread loading the brick of the current particle (center brick)
+				s_particleBrickPosInWorld = particleBrickPosInWorld;
 			}
 		}
 	}
@@ -784,18 +811,17 @@ extern "C" __global__ void gvdbScatterReduceLevelSet(
 
 	// Only shuffle between active threads
 	if (activeThreadsMask & (1 << laneIndex)) {
-		float3 setPosInWorld = particlePosInWorld + (make_float3(0.5, 0.5, 0.5) * s_cellDimension);
-		float3 setPosInBrick = (setPosInWorld - s_brickPosInWorld);
-		int3 particleCellIndexInBrick = make_int3(setPosInBrick / s_cellDimension);
-		float3 particleCellPosInWorld = make_float3(particleCellIndexInBrick) * s_cellDimension + s_brickPosInWorld;
+		float3 setPosInWorld = particlePosInWorld + (make_float3(0.5, 0.5, 0.5) * cellDimension);
+		float3 setPosInBrick = (setPosInWorld - s_particleBrickPosInWorld);
+		int3 particleCellIndexInBrick = make_int3(setPosInBrick / cellDimension);
+		float3 particleCellPosInWorld = make_float3(particleCellIndexInBrick) * cellDimension + s_particleBrickPosInWorld;
 		float3 particlePosInCell = (particlePosInWorld - particleCellPosInWorld);
 
-		for (int dx = 0; dx <= 0; dx++) {
-			for (int dy = 0; dy <= 0; dy++) {
-				for (int dz = 0; dz <= 0; dz++) { // DEBUG: gather also limited in range to 0.5*vdel
-
+		for (int dx = -1; dx <= 1; dx++) {
+			for (int dy = -1; dy <= 1; dy++) {
+				for (int dz = -1; dz <= 1; dz++) {
 					shuffleLevelSetValue(
-						particleCellIndexInBrick, particlePosInCell, s_cellDimension, make_int3(dx, dy, dz), radius,
+						particleCellIndexInBrick, particlePosInCell, cellDimension, make_int3(dx, dy, dz), radius,
 						laneIndex, activeThreadsMask, cellFlagMask, s_brickCache
 					);
 				}
@@ -805,18 +831,37 @@ extern "C" __global__ void gvdbScatterReduceLevelSet(
 
 	__syncthreads();
 
-	// TODO: find node for apron too
 	// Atomic write brickCache contents to the atlas
 	for (uint threadOffset = 0; threadOffset < 10*10*10; threadOffset += blockDim.x) {
 		uint j = threadOffset + threadIdx.x;
 		if (j < 10*10*10) {
-			uint3 cellIndexInBrick = make_uint3(j % 10, (j / 10) % 10, j / 100);
-			uint3 cellIndexInAtlas = s_brickIndexInAtlas + cellIndexInBrick;
-			unsigned long int atlasIndex = cellIndexInAtlas.z * s_atlasSize.x * s_atlasSize.y +
-							cellIndexInAtlas.y * s_atlasSize.x + cellIndexInAtlas.x;
+			uint3 cellIndexInParticleBrick = make_uint3(j % 10, (j / 10) % 10, j / 100);
+			int3 brickOffset = make_int3(0, 0, 0);
+			if (cellIndexInParticleBrick.x == 0) {
+				brickOffset.x = -1;
+			} else if (cellIndexInParticleBrick.x == 9) {
+				brickOffset.x = 1;
+			}
+			if (cellIndexInParticleBrick.y == 0) {
+				brickOffset.y = -1;
+			} else if (cellIndexInParticleBrick.y == 9) {
+				brickOffset.y = 1;
+			}
+			if (cellIndexInParticleBrick.z == 0) {
+				brickOffset.z = -1;
+			} else if (cellIndexInParticleBrick.z == 9) {
+				brickOffset.z = 1;
+			}
+			uint3 cellIndexInBrick = make_uint3(make_int3(cellIndexInParticleBrick) - brickOffset*brickWidthInVoxels);
+			uint3 brickIndexInAtlas = s_brickIndexInAtlas[brickOffset.z + 1][brickOffset.y + 1][brickOffset.x + 1];
+			if (brickIndexInAtlas.x != 0xffffffff || brickIndexInAtlas.y != 0xffffffff || brickIndexInAtlas.z != 0xffffffff) {
+				uint3 cellIndexInAtlas = brickIndexInAtlas + cellIndexInBrick;
+				unsigned long int atlasIndex = cellIndexInAtlas.z * atlasSize.x * atlasSize.y +
+								cellIndexInAtlas.y * atlasSize.x + cellIndexInAtlas.x;
 
-			float* atlasAddress = (float*) gvdb->atlas_dev_mem[chanLevelSet] + atlasIndex;
-			atomicMinF(atlasAddress, s_brickCache[cellIndexInBrick.z][cellIndexInBrick.y][cellIndexInBrick.x]);
+				float* atlasAddress = (float*) gvdb->atlas_dev_mem[chanLevelSet] + atlasIndex;
+				atomicMinF(atlasAddress, s_brickCache[cellIndexInParticleBrick.z][cellIndexInParticleBrick.y][cellIndexInParticleBrick.x]);
+			}
 		}
 	}
 }

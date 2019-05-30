@@ -6348,7 +6348,8 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 	PrepareVDB();
 
 	int scatterGridSize = (scatterThreadCount + blockSize - 1) / blockSize;
-	void *scatterArgs[12] = {
+	int brickWidthInVoxels = mPool->getAtlasBrickwid(chanLevelSet); // Brick width excluding apron
+	void *scatterArgs[15] = {
 		&cuVDBInfo,
 		&num_pnts,
 		&scatterThreadCount,
@@ -6359,6 +6360,9 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 		&mAux[AUX_PARTICLE_SORT_KEYS].gpu,
 		&mAux[AUX_SORTED_PARTICLE_INDEX].gpu,
 		&mAux[AUX_PARTICLE_CELL_FLAG].gpu,
+		&mVDBInfo.vdel[0],
+		&brickWidthInVoxels,
+		&mVDBInfo.atlas_res,
 		&trans.x,
 		&chanLevelSet
 	};
