@@ -1627,8 +1627,8 @@ extern "C" __global__ void fillParticleIndex(int particleCount, uint* particleIn
 	}
 }
 
-extern "C" __global__ void fillParticleCellSortKeys(
-	VDBInfo* gvdb, int particleCount, char* ppos, int pos_off, int pos_stride, uint* particleSortKeys, uint* sortedParticleIndex)
+extern "C" __global__ void fillParticleSortKeys(
+	VDBInfo* gvdb, int particleCount, char* ppos, int pos_off, int pos_stride, int brickWidthWithApronInVoxels, int3 atlasWidthInBricks, uint* particleSortKeys, uint* sortedParticleIndex)
 {
 	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
 	if (idx < particleCount) {
@@ -1639,52 +1639,27 @@ extern "C" __global__ void fillParticleCellSortKeys(
 		float3 offs, brickPosInWorld, vdel;
 		uint64 nodeId;
 		VDBNode* node = getNodeAtPoint(gvdb, setPosInWorld, &offs, &brickPosInWorld, &vdel, &nodeId);
-		if (node == 0x0) {
-			return; // If no brick at location, return
-		}
+		uint3 brickIndexInAtlas = make_uint3(node->mValue) / brickWidthWithApronInVoxels;
+		uint brickIndex = brickIndexInAtlas.z*atlasWidthInBricks.x*atlasWidthInBricks.y +
+			brickIndexInAtlas.y*atlasWidthInBricks.x + brickIndexInAtlas.x;
 
-		int3 brickIndexInAtlas = make_int3(node->mValue);
-		float3 setPosInBrick = (setPosInWorld - brickPosInWorld);
-		int3 cellIndexInBrick = make_int3(setPosInBrick / gvdb->vdel[0]);
-		uint3 cellIndexInAtlas = make_uint3(brickIndexInAtlas + cellIndexInBrick);
+		float3 setPosInBrick = setPosInWorld - brickPosInWorld;
+		uint3 cellIndexInBrick = make_uint3(setPosInBrick / gvdb->vdel[0]);
 
-		// Each dimension is represented as 10 bits
-		particleSortKeys[idx] = (cellIndexInAtlas.x & 0x3ff)
-			+ ((cellIndexInAtlas.y << 10) & (0x3ff << 10))
-			+ ((cellIndexInAtlas.z << 20) & (0x3ff << 20));
+		particleSortKeys[idx] = ((brickIndex & 0x7fffff) << 9)
+			| ((cellIndexInBrick.z & 0x7) << 6)
+			| ((cellIndexInBrick.y & 0x7) << 3)
+			| (cellIndexInBrick.x & 0x7);
 	}
 }
 
-extern "C" __global__ void fillParticleBrickSortKeys(
-	VDBInfo* gvdb, int particleCount, char* ppos, int pos_off, int pos_stride, uint brickWidth, uint* particleSortKeys, uint* sortedParticleIndex)
-{
-	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
-	if (idx < particleCount) {
-		float3 particlePosInWorld = *(float3*) (ppos + sortedParticleIndex[idx]*pos_stride + pos_off);
-
-		// Get GVDB node at the particle point
-		float3 setPosInWorld = particlePosInWorld + make_float3(0.5, 0.5, 0.5)*gvdb->vdel[0];
-		float3 offs, brickPosInWorld, vdel;
-		uint64 nodeId;
-		VDBNode* node = getNodeAtPoint(gvdb, setPosInWorld, &offs, &brickPosInWorld, &vdel, &nodeId);
-		if (node == 0x0) {
-			return; // If no brick at location, return
-		}
-		uint3 brickIndexInAtlas = make_uint3(node->mValue);
-
-		// Each dimension is represented as 10 bits
-		particleSortKeys[idx] = (brickIndexInAtlas.x & 0x3ff)
-			+ ((brickIndexInAtlas.y << 10) & (0x3ff << 10))
-			+ ((brickIndexInAtlas.z << 20) & (0x3ff << 20));
-	}
-}
-
-extern "C" __global__ void markParticleFlag(int particleCount, uint* particleSortKeys, uint* flag)
+extern "C" __global__ void markParticleFlags(int particleCount, uint* particleSortKeys, uint* brickFlag, uint* cellFlag)
 {
 	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
 	if (idx < particleCount) {
 		// Mark flag as true on first index or if sort keys differ from the previous index
-		flag[idx] = (idx == 0 || particleSortKeys[idx - 1] != particleSortKeys[idx]);
+		cellFlag[idx] = (idx == 0 || particleSortKeys[idx - 1] != particleSortKeys[idx]);
+		brickFlag[idx] = (idx == 0 || (particleSortKeys[idx - 1] >> 9) != (particleSortKeys[idx] >> 9));
 	}
 }
 
