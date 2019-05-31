@@ -707,12 +707,24 @@ inline __device__ void shuffleLevelSetValue(
 {
 	float3 delta = particlePosInCell - (make_float3(offset) * cellDimension);
 	float distance = norm3df(delta.x, delta.y, delta.z);
+	float levelSetValue = distance - radius;
 
-	// TODO: implement warp shuffle (currently we use atomic min to shared memory)
+	uint shuffleDestinationMask = (cellFlagMask ^ activeThreadsMask) >> 1;
+	for (uint stride = 1; stride < 32; stride <<= 1) {
+		float shuffledLevelSetValue = __shfl_down_sync(activeThreadsMask, levelSetValue, stride);
+		if ((shuffleDestinationMask & (1 << laneIndex)) && shuffledLevelSetValue < levelSetValue) {
+			levelSetValue = shuffledLevelSetValue;
+		}
+		shuffleDestinationMask &= (shuffleDestinationMask >> stride);
+	}
 
-	int3 cellIndexInBrickCache = particleCellIndexInBrick + offset;
-	float* cell = &brickCache[cellIndexInBrickCache.z][cellIndexInBrickCache.y][cellIndexInBrickCache.x];
-	atomicMinF(cell, distance - radius);
+	if (cellFlagMask & (1 << laneIndex)) {
+		int3 cellIndexInBrick = particleCellIndexInBrick + offset;
+		float* cell = &brickCache[cellIndexInBrick.z][cellIndexInBrick.y][cellIndexInBrick.x];
+		if (levelSetValue < *cell) {
+			*cell = levelSetValue;
+		}
+	}
 }
 
 extern "C" __global__ void gvdbScatterReduceLevelSet(
@@ -805,31 +817,31 @@ extern "C" __global__ void gvdbScatterReduceLevelSet(
 	}
 
 	uint activeThreadsMask = __ballot_sync(0xffffffff, isCurrentThreadActive);
-	uint cellFlagMask = __ballot_sync(activeThreadsMask, isCurrentThreadFirstInCell);
+	uint cellFlagMask = __ballot_sync(0xffffffff, isCurrentThreadFirstInCell);
 
 	__syncthreads();
 
 	// Only shuffle between active threads
-	if (activeThreadsMask & (1 << laneIndex)) {
-		float3 setPosInWorld = particlePosInWorld + (make_float3(0.5, 0.5, 0.5) * cellDimension);
-		float3 setPosInBrick = (setPosInWorld - s_particleBrickPosInWorld);
-		int3 particleCellIndexInBrick = make_int3(setPosInBrick / cellDimension);
-		float3 particleCellPosInWorld = make_float3(particleCellIndexInBrick) * cellDimension + s_particleBrickPosInWorld;
-		float3 particlePosInCell = (particlePosInWorld - particleCellPosInWorld);
+	for (int dx = -1; dx <= 1; dx++) {
+		for (int dy = -1; dy <= 1; dy++) {
+			for (int dz = -1; dz <= 1; dz++) {
+				if (activeThreadsMask & (1 << laneIndex)) {
+					float3 setPosInWorld = particlePosInWorld + (make_float3(0.5, 0.5, 0.5) * cellDimension);
+					float3 setPosInBrick = (setPosInWorld - s_particleBrickPosInWorld);
+					int3 particleCellIndexInBrick = make_int3(setPosInBrick / cellDimension);
+					float3 particleCellPosInWorld = make_float3(particleCellIndexInBrick) * cellDimension + s_particleBrickPosInWorld;
+					float3 particlePosInCell = (particlePosInWorld - particleCellPosInWorld);
 
-		for (int dx = -1; dx <= 1; dx++) {
-			for (int dy = -1; dy <= 1; dy++) {
-				for (int dz = -1; dz <= 1; dz++) {
 					shuffleLevelSetValue(
 						particleCellIndexInBrick, particlePosInCell, cellDimension, make_int3(dx, dy, dz), radius,
 						laneIndex, activeThreadsMask, cellFlagMask, s_brickCache
 					);
+
+					__syncthreads();
 				}
 			}
 		}
 	}
-
-	__syncthreads();
 
 	// Atomic write brickCache contents to the atlas
 	for (uint threadOffset = 0; threadOffset < 10*10*10; threadOffset += blockDim.x) {
