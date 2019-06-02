@@ -836,9 +836,9 @@ extern "C" __global__ void gvdbScatterReduceLevelSet(
 						particleCellIndexInBrick, particlePosInCell, cellDimension, make_int3(dx, dy, dz), radius,
 						laneIndex, activeThreadsMask, cellFlagMask, s_brickCache
 					);
-
-					__syncthreads();
 				}
+
+				__syncthreads();
 			}
 		}
 	}
