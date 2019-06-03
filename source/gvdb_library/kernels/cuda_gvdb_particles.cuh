@@ -25,6 +25,7 @@
 // - SplatPoints		- splat points into bricks
 
 #include <stdio.h>
+#include <float.h>
 
 #define RGBA2INT(r,g,b,a)	(				uint((r)*255.0f) +		(uint((g)*255.0f)<<8) +			(uint((b)*255.0f)<<16) +		(uint((a)*255.0f)<<24) )
 #define CLR2INT(c)			(				uint((c.x)*255.0f) +	(uint((c.y)*255.0f)<<8)	+		(uint((c.z)*255.0f)<<16) +		(uint((c.w)*255.0f)<<24 ) )
@@ -746,11 +747,11 @@ extern "C" __global__ void gvdbScatterReduceLevelSet(
 	bool isCurrentThreadActive = false;
 	bool isCurrentThreadFirstInCell = false;
 
-	// Initialize brickCache with max_float
+	// Initialize brickCache
 	for (uint threadOffset = 0; threadOffset < 10*10*10; threadOffset += blockDim.x) {
 		uint j = threadOffset + threadIdx.x;
 		if (j < 10*10*10) {
-			*((float*) s_brickCache + j) = 3.0f; // TODO: find proper max float
+			*((float*) s_brickCache + j) = FLT_MAX;
 		}
 	}
 
@@ -800,15 +801,8 @@ extern "C" __global__ void gvdbScatterReduceLevelSet(
 			if (node) {
 				s_brickIndexInAtlas[brickIndex.z][brickIndex.y][brickIndex.x] = make_uint3(node->mValue) - make_uint3(1, 1, 1);
 			} else {
+				// No brick allocated in this position
 				s_brickIndexInAtlas[brickIndex.z][brickIndex.y][brickIndex.x] = make_uint3(0xffffffff, 0xffffffff, 0xffffffff);
-				printf(
-					"WARNING: scatterReduceLevelSet: invalid node at setPosInWorld %f, %f, %f - relativeBrickOffset %f, %f, %f\n",
-					setPosInWorld.x, setPosInWorld.y, setPosInWorld.z,
-					relativeBrickOffset.x, relativeBrickOffset.y, relativeBrickOffset.z
-				);
-				// TODO: this happens because gvdb only adds 6 adjacent cells as apron (diagonal neighbors are not added)
-				// The fix is to add all 26 neighbor cells when allocating bricks
-				// This will also fix gather
 			}
 			if (j == 13) { // Thread loading the brick of the current particle (center brick)
 				s_particleBrickPosInWorld = particleBrickPosInWorld;

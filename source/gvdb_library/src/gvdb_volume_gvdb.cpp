@@ -1079,7 +1079,9 @@ void VolumeGVDB::ActivateExtraBricksGPU(int pNumPnts, float pRadius, Vector3DF p
 	int threads = 512;		
 	int pblks = int(pNumPnts / threads)+1;
 
-	PrepareAux ( AUX_BRICK_LEVXYZ, pNumPnts * pRootLev * 4, sizeof(unsigned short), true );
+	// Ideally 27*pNumPts to cover all possible extra bricks, but this will rarely happen, so a heuristic is used
+	// Increase the multiplier if a memory error occurs here
+	PrepareAux ( AUX_BRICK_LEVXYZ, pNumPnts * pRootLev * 4 * 2 + 1024, sizeof(unsigned short), true );
 	PrepareAux ( AUX_EXTRA_BRICK_CNT, 1, sizeof(int), true, true);
 
 	PUSH_CTX
