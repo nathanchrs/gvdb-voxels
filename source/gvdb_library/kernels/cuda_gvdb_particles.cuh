@@ -719,7 +719,7 @@ inline __device__ void shuffleLevelSetValue(
 		shuffleDestinationMask &= (shuffleDestinationMask >> stride);
 	}
 
-	if (cellFlagMask & (1 << laneIndex)) {
+	if ((cellFlagMask & (1 << laneIndex)) || laneIndex == 0) {
 		int3 cellIndexInBrick = particleCellIndexInBrick + offset;
 		float* cell = &brickCache[cellIndexInBrick.z][cellIndexInBrick.y][cellIndexInBrick.x];
 		if (levelSetValue < *cell) {
