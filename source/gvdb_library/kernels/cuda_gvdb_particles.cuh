@@ -722,10 +722,15 @@ inline __device__ void shuffleLevelSetValue(
 	if ((cellFlagMask & (1 << laneIndex)) || laneIndex == 0) {
 		int3 cellIndexInBrick = particleCellIndexInBrick + offset;
 		float* cell = &brickCache[cellIndexInBrick.z][cellIndexInBrick.y][cellIndexInBrick.x];
-		if (levelSetValue < *cell) {
-			*cell = levelSetValue;
-		}
+		atomicMinF(cell, levelSetValue);
 	}
+
+	/*
+	// Atomic write to shared memory instead of shuffling
+	int3 cellIndexInBrick = particleCellIndexInBrick + offset;
+	float* cell = &brickCache[cellIndexInBrick.z][cellIndexInBrick.y][cellIndexInBrick.x];
+	atomicMinF(cell, levelSetValue);
+	*/
 }
 
 extern "C" __global__ void gvdbScatterReduceLevelSet(
@@ -831,11 +836,11 @@ extern "C" __global__ void gvdbScatterReduceLevelSet(
 						laneIndex, activeThreadsMask, cellFlagMask, s_brickCache
 					);
 				}
-
-				__syncthreads();
 			}
 		}
 	}
+
+	__syncthreads();
 
 	// Atomic write brickCache contents to the atlas
 	for (uint threadOffset = 0; threadOffset < 10*10*10; threadOffset += blockDim.x) {
