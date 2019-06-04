@@ -734,9 +734,9 @@ inline __device__ void shuffleLevelSetValue(
 }
 
 extern "C" __global__ void gvdbScatterReduceLevelSet(
-	VDBInfo* gvdb, int num_pnts, uint num_threads, float radius,
+	VDBInfo* gvdb, int num_pnts, float radius,
 	char* ppos, int pos_off, int pos_stride,
-	uint* particleThreadIndex, uint* sortedParticleIndex, uint* particleCellFlag,
+	uint* blockParticleOffsets, uint* sortedParticleIndex, uint* particleCellFlag,
 	float3 cellDimension, int brickWidthInVoxels, int3 atlasSize,
 	float3 ptrans, int chanLevelSet)
 {
@@ -747,7 +747,6 @@ extern "C" __global__ void gvdbScatterReduceLevelSet(
 
 	float3 particlePosInWorld;
 
-	uint i = blockIdx.x * blockDim.x + threadIdx.x;
 	uint laneIndex = threadIdx.x & 0x1f;
 	bool isCurrentThreadActive = false;
 	bool isCurrentThreadFirstInCell = false;
@@ -760,30 +759,25 @@ extern "C" __global__ void gvdbScatterReduceLevelSet(
 		}
 	}
 
-	// Load particle data and mark active threads
-	if (i < num_threads) {
-		// Binary search particle index for the current thread index
-		uint left = 0;
-		uint right = num_pnts - 1;
-		uint mid;
-		while (right > left) {
-			mid = left + (right - left) / 2;
-			if (particleThreadIndex[mid] >= i) {
-				right = mid;
-			} else {
-				left = mid + 1;
-			}
-		}
+	uint blockParticleOffset = blockParticleOffsets[blockIdx.x];
+	uint nextBlockParticleOffset;
+	if (blockIdx.x == gridDim.x - 1) {
+		nextBlockParticleOffset = num_pnts; // Last block
+	} else {
+		nextBlockParticleOffset = blockParticleOffsets[blockIdx.x + 1];
+	}
+	uint particleCountInCurrentBlock = nextBlockParticleOffset - blockParticleOffset;
 
-		if (particleThreadIndex[right] == i) { // Thread is assigned to a particle
-			particlePosInWorld = (*(float3*) (ppos + sortedParticleIndex[right]*pos_stride + pos_off)) + ptrans;
+	if (threadIdx.x < particleCountInCurrentBlock) { // Thread is assigned to a particle
+		// Load particle data and mark active threads
+		uint particleIndex = blockParticleOffset + threadIdx.x;
+		particlePosInWorld = (*(float3*) (ppos + sortedParticleIndex[particleIndex]*pos_stride + pos_off)) + ptrans;
 
-			isCurrentThreadActive = true;
-			isCurrentThreadFirstInCell = particleCellFlag[right];
+		isCurrentThreadActive = true;
+		isCurrentThreadFirstInCell = particleCellFlag[particleIndex];
 
-			if (threadIdx.x == 0) {
-				s_firstParticlePosInWorld = particlePosInWorld;
-			}
+		if (threadIdx.x == 0) {
+			s_firstParticlePosInWorld = particlePosInWorld;
 		}
 	}
 
@@ -1695,22 +1689,5 @@ extern "C" __global__ void markParticleBlockFlag(
 			cellFlag[idx] = 1;
 			brickFlag[idx] = 1;
 		}
-	}
-}
-
-extern "C" __global__ void computeParticleNegatedBlockFlag(int particleCount, uint* blockFlag, uint* negatedBlockFlag)
-{
-	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
-	if (idx < particleCount) {
-		negatedBlockFlag[idx] = !blockFlag[idx];
-	}
-}
-
-extern "C" __global__ void computeParticleThreadIndex(
-	int particleCount, uint maxBlockParticleCount, uint* particleBlockNumbers, uint* particleIndexInBlock)
-{
-	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
-	if (idx < particleCount) {
-		particleIndexInBlock[idx] += ((particleBlockNumbers[idx] - 1) * maxBlockParticleCount);
 	}
 }

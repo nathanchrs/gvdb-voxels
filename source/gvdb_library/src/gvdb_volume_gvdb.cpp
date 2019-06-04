@@ -351,8 +351,6 @@ void VolumeGVDB::SetCudaDevice ( int devid, CUcontext ctx )
 	LoadFunction ( FUNC_MARK_PARTICLE_FLAGS, "markParticleFlags", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_COMPUTE_BRICK_FLAG_OFFSETS, "computeBrickFlagOffsets", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_MARK_PARTICLE_BLOCK_FLAG, "markParticleBlockFlag", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
-	LoadFunction ( FUNC_COMPUTE_PARTICLE_NEGATED_BLOCK_FLAG, "computeParticleNegatedBlockFlag", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
-	LoadFunction ( FUNC_COMPUTE_PARTICLE_THREAD_INDEX, "computeParticleThreadIndex", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 
 	SetModule ( cuModule[MODL_PRIMARY] );
 
@@ -2607,15 +2605,6 @@ void VolumeGVDB::Initialize ()
 
 	result = cudppPlan(mCudpp, &mPlan_particleScan, config_particleScan, maxNum, 1, 0);
 	if (result != CUDPP_SUCCESS) printf("Error in particleScan plan creation (error code: %d).\n", result);
-
-	CUDPPConfiguration config_particleSegmentedScan;
-	config_particleSegmentedScan.algorithm = CUDPP_SEGMENTED_SCAN;
-	config_particleSegmentedScan.datatype = CUDPP_UINT;
-	config_particleSegmentedScan.op = CUDPP_ADD;
-	config_particleSegmentedScan.options = CUDPP_OPTION_FORWARD | CUDPP_OPTION_INCLUSIVE;
-
-	result = cudppPlan(mCudpp, &mPlan_particleSegmentedScan, config_particleSegmentedScan, maxNum, 1, 0);
-	if (result != CUDPP_SUCCESS) printf("Error in particleSegmentedScan plan creation (error code: %d).\n", result);
 
 	mRebuildTopo = true;
 	mCurrDepth = -1;
@@ -6257,6 +6246,8 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_MARK_PARTICLE_FLAGS", mbDebug
 	);
 
+	// Compute brick index and offsets
+
 	cudppScan(mPlan_particleScan, (void*) mAux[AUX_PARTICLE_SORT_KEYS].gpu,
 		(void*) mAux[AUX_PARTICLE_BRICK_FLAG].gpu, num_pnts);
 
@@ -6284,58 +6275,44 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_MARK_PARTICLE_BLOCK_FLAG", mbDebug
 	);
 
-	void *computeParticleNegatedBlockFlagArgs[3] = {
+	// Compute block index and offsets
+
+	cudppScan(mPlan_particleScan, (void*) mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+		(void*) mAux[AUX_PARTICLE_BRICK_FLAG].gpu, num_pnts);
+
+	void *computeBlockFlagOffsetsArgs[4] = {
 		&num_pnts,
+		&mAux[AUX_PARTICLE_SORT_KEYS].gpu,
 		&mAux[AUX_PARTICLE_BRICK_FLAG].gpu,
 		&mAux[AUX_BRICK_FLAG_OFFSETS].gpu
 	};
 	cudaCheck(
-		cuLaunchKernel(cuFunc[FUNC_COMPUTE_PARTICLE_NEGATED_BLOCK_FLAG], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, computeParticleNegatedBlockFlagArgs, NULL),
-		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_COMPUTE_PARTICLE_NEGATED_BLOCK_FLAG", mbDebug
+		cuLaunchKernel(cuFunc[FUNC_COMPUTE_BRICK_FLAG_OFFSETS], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, computeBlockFlagOffsetsArgs, NULL),
+		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_COMPUTE_BRICK_FLAG_OFFSETS", mbDebug
 	);
 
-	cudppSegmentedScan(mPlan_particleSegmentedScan, (void*) mAux[AUX_PARTICLE_SORT_KEYS].gpu,
-		(void*) mAux[AUX_BRICK_FLAG_OFFSETS].gpu, (unsigned int*) mAux[AUX_PARTICLE_BRICK_FLAG].gpu, num_pnts);
-
-	cudppScan(mPlan_particleScan, (void*) mAux[AUX_BRICK_FLAG_OFFSETS].gpu,
-		(void*) mAux[AUX_PARTICLE_BRICK_FLAG].gpu, num_pnts);
-
-	void *computeParticleThreadIndexArgs[4] = {
-		&num_pnts,
-		&maxBlockParticleCount,
-		&mAux[AUX_BRICK_FLAG_OFFSETS].gpu,
-		&mAux[AUX_PARTICLE_SORT_KEYS].gpu
-	};
-	cudaCheck(
-		cuLaunchKernel(cuFunc[FUNC_COMPUTE_PARTICLE_THREAD_INDEX], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, computeParticleThreadIndexArgs, NULL),
-		"VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch", "FUNC_COMPUTE_PARTICLE_THREAD_INDEX", mbDebug
-	);
-
-	uint scatterThreadCount;
-	uint* d_scatterThreadCount = ((uint*) mAux[AUX_PARTICLE_SORT_KEYS].gpu) + num_pnts - 1;
-	cudaCheck(cuMemcpyDtoH(&scatterThreadCount, (CUdeviceptr) d_scatterThreadCount, sizeof(uint)),
-		"VolumeGVDB", "ScatterReduceLevelSet", "cuMemcpyDtoH", "scatterThreadCount", mbDebug);
-	scatterThreadCount++;
+	uint scatterBlockCount;
+	uint* d_scatterBlockCount = ((uint*) mAux[AUX_PARTICLE_SORT_KEYS].gpu) + num_pnts - 1;
+	cudaCheck(cuMemcpyDtoH(&scatterBlockCount, (CUdeviceptr) d_scatterBlockCount, sizeof(uint)),
+		"VolumeGVDB", "ScatterReduceLevelSet", "cuMemcpyDtoH", "scatterBlockCount", mbDebug);
 
 	PERF_POP();
 
-	printf("ScatterReduceLevelSet::scatterThreadCount: %d\n", scatterThreadCount); // DEBUG
+	printf("ScatterReduceLevelSet::scatterBlockCount: %d\n", scatterBlockCount); // DEBUG
 
 	// Actual scattering
 	PERF_PUSH("ScatterReduceLevelSet_Scatter");
 	PrepareVDB();
 
-	int scatterGridSize = (scatterThreadCount + blockSize - 1) / blockSize;
 	int brickWidthInVoxels = mPool->getAtlasBrickwid(chanLevelSet); // Brick width excluding apron
-	void *scatterArgs[15] = {
+	void *scatterArgs[14] = {
 		&cuVDBInfo,
 		&num_pnts,
-		&scatterThreadCount,
 		&radius,
 		&mAux[AUX_PNTPOS].gpu,
 		&mAux[AUX_PNTPOS].subdim.x,
 		&mAux[AUX_PNTPOS].stride,
-		&mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+		&mAux[AUX_BRICK_FLAG_OFFSETS].gpu,
 		&mAux[AUX_SORTED_PARTICLE_INDEX].gpu,
 		&mAux[AUX_PARTICLE_CELL_FLAG].gpu,
 		&mVDBInfo.vdel[0],
@@ -6345,7 +6322,7 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 		&chanLevelSet
 	};
 	cudaCheck(
-		cuLaunchKernel(cuFunc[FUNC_SCATTER_REDUCE_LEVEL_SET], scatterGridSize, 1, 1, blockSize, 1, 1, 0, NULL, scatterArgs, NULL),
+		cuLaunchKernel(cuFunc[FUNC_SCATTER_REDUCE_LEVEL_SET], (int) scatterBlockCount, 1, 1, blockSize, 1, 1, 0, NULL, scatterArgs, NULL),
         "VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch",
         "FUNC_SCATTER_REDUCE_LEVEL_SET", mbDebug
 	);
