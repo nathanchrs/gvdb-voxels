@@ -276,6 +276,11 @@
 	#define AUX_MATRIX4F			20
 	#define AUX_DOWNSAMPLED			21
 
+	// MPM particle data (particle position and velocity using AUX_PNTPOS, AUX_PNTVEL)
+	#define AUX_PNTMASS				24
+	#define AUX_PNTDEFGRADIENT		25
+	#define AUX_PNTAFFINESTATE		26
+
 	// Topology
 	#define AUX_PBRICKDX			30
 	#define AUX_ACTIVBRICKCNT		31
@@ -542,7 +547,13 @@
 			char* getDataCPU ( DataPtr ptr, int n, int stride );
 			void PrefixSum ( CUdeviceptr outArray, CUdeviceptr inArray, int numElements );
 			void SetPoints ( DataPtr& pntpos, DataPtr& pntvel, DataPtr& clrpos );
-			void InsertPoints ( int num_pnts, Vector3DF trans, bool bPrefix=false );					
+
+			void VolumeGVDB::SetPoints(
+				DataPtr &pointPositions, DataPtr &pointMasses, DataPtr &pointVelocities,
+				DataPtr &pointDeformationGradients, DataPtr &pointAffineState
+			);
+
+			void InsertPoints(int num_pnts, Vector3DF trans, bool bPrefix = false);
 			Vector3DI InsertTriangles ( Model* model, Matrix4F* xform, float& ydiv );
 
 			void SetSupportPoints ( DataPtr& pntpos, DataPtr& dirpos );

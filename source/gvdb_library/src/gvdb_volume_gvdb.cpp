@@ -172,7 +172,11 @@ VolumeGVDB::VolumeGVDB ()
 	mAuxName[AUX_DATA3D] = "DATA3D";
 	mAuxName[AUX_MATRIX4F] = "MATRIX4F";
 
-	mAuxName[AUX_PBRICKDX] = "PBRICKDX"; 
+	mAuxName[AUX_PNTMASS] = "PNTMASS";
+	mAuxName[AUX_PNTDEFGRADIENT] = "PNTDEFGRADIENT";
+	mAuxName[AUX_PNTAFFINESTATE] = "PNTAFFINESTATE";
+
+	mAuxName[AUX_PBRICKDX] = "PBRICKDX";
 	mAuxName[AUX_ACTIVBRICKCNT] = "ACTIVEBRICKCNT";
 	mAuxName[AUX_BRICK_LEVXYZ] = "BRICK_LEVXYZ";
 	mAuxName[AUX_RANGE_RES] = "RANGE_RES";
@@ -5334,14 +5338,15 @@ void VolumeGVDB::CommitTransferFunc ()
 	POP_CTX
 }
 
-void VolumeGVDB::SetPoints ( DataPtr& pntpos, DataPtr& pntvel, DataPtr& pntclr )
-{
-	mAux[AUX_PNTPOS] = pntpos;
-	mAux[AUX_PNTVEL] = pntvel;
-	mAux[AUX_PNTCLR] = pntclr;
-
-	if ( pntvel.gpu==0 ) CleanAux ( AUX_SUBCELL_PNT_VEL );
-	if ( pntclr.gpu==0 ) CleanAux ( AUX_SUBCELL_PNT_CLR );
+void VolumeGVDB::SetPoints(
+	DataPtr& pointPositions, DataPtr& pointMasses, DataPtr& pointVelocities,
+	DataPtr& pointDeformationGradients, DataPtr& pointAffineState
+) {
+	mAux[AUX_PNTPOS] = pointPositions;
+	mAux[AUX_PNTMASS]= pointMasses;
+	mAux[AUX_PNTVEL] = pointVelocities;
+	mAux[AUX_PNTDEFGRADIENT] = pointDeformationGradients;
+	mAux[AUX_PNTAFFINESTATE] = pointAffineState; // init 0
 }
 
 void VolumeGVDB::SetDiv ( DataPtr div )
