@@ -175,6 +175,7 @@ VolumeGVDB::VolumeGVDB ()
 	mAuxName[AUX_PNTMASS] = "PNTMASS";
 	mAuxName[AUX_PNTDEFGRADIENT] = "PNTDEFGRADIENT";
 	mAuxName[AUX_PNTAFFINESTATE] = "PNTAFFINESTATE";
+	mAuxName[AUX_PNTINITIALVOLUME] = "PNTINITIALVOLUME";
 
 	mAuxName[AUX_PBRICKDX] = "PBRICKDX";
 	mAuxName[AUX_ACTIVBRICKCNT] = "ACTIVEBRICKCNT";
@@ -5340,13 +5341,14 @@ void VolumeGVDB::CommitTransferFunc ()
 
 void VolumeGVDB::SetPoints(
 	DataPtr& pointPositions, DataPtr& pointMasses, DataPtr& pointVelocities,
-	DataPtr& pointDeformationGradients, DataPtr& pointAffineState
+	DataPtr& pointDeformationGradients, DataPtr& pointAffineStates, DataPtr& pointInitialVolumes
 ) {
 	mAux[AUX_PNTPOS] = pointPositions;
 	mAux[AUX_PNTMASS]= pointMasses;
 	mAux[AUX_PNTVEL] = pointVelocities;
 	mAux[AUX_PNTDEFGRADIENT] = pointDeformationGradients;
-	mAux[AUX_PNTAFFINESTATE] = pointAffineState; // init 0
+	mAux[AUX_PNTAFFINESTATE] = pointAffineStates; // init 0
+	mAux[AUX_PNTINITIALVOLUME] = pointInitialVolumes;
 }
 
 void VolumeGVDB::SetDiv ( DataPtr div )

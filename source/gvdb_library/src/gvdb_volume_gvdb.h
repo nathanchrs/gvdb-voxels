@@ -280,6 +280,7 @@
 	#define AUX_PNTMASS				24
 	#define AUX_PNTDEFGRADIENT		25
 	#define AUX_PNTAFFINESTATE		26
+	#define AUX_PNTINITIALVOLUME	27
 
 	// Topology
 	#define AUX_PBRICKDX			30
@@ -548,9 +549,9 @@
 			void PrefixSum ( CUdeviceptr outArray, CUdeviceptr inArray, int numElements );
 			void SetPoints ( DataPtr& pntpos, DataPtr& pntvel, DataPtr& clrpos );
 
-			void VolumeGVDB::SetPoints(
+			void SetPoints(
 				DataPtr &pointPositions, DataPtr &pointMasses, DataPtr &pointVelocities,
-				DataPtr &pointDeformationGradients, DataPtr &pointAffineState
+				DataPtr &pointDeformationGradients, DataPtr &pointAffineStates, DataPtr &pointInitialVolumes
 			);
 
 			void InsertPoints(int num_pnts, Vector3DF trans, bool bPrefix = false);
