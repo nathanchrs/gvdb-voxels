@@ -357,6 +357,10 @@ void VolumeGVDB::SetCudaDevice ( int devid, CUcontext ctx )
 	LoadFunction ( FUNC_COMPUTE_BRICK_FLAG_OFFSETS, "computeBrickFlagOffsets", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_MARK_PARTICLE_BLOCK_FLAG, "markParticleBlockFlag", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 
+	LoadFunction ( FUNC_P2G_SCATTER_APIC, "P2G_ScatterAPIC", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
+	LoadFunction ( FUNC_G2P_GATHER_APIC, "G2P_GatherAPIC", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
+	LoadFunction ( FUNC_CONVERT_LINEAR_MASS_CHANNEL_TO_TEXTURE_LEVEL_SET_CHANNEL_F, "convertLinearMassChannelToTextureLevelSetChannelF", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
+
 	SetModule ( cuModule[MODL_PRIMARY] );
 
 	POP_CTX
@@ -365,7 +369,7 @@ void VolumeGVDB::SetCudaDevice ( int devid, CUcontext ctx )
 // Reset to default module
 void VolumeGVDB::SetModule ()
 {
-	SetModule ( cuModule[MODL_PRIMARY] );	
+	SetModule ( cuModule[MODL_PRIMARY] );
 }
 
 // Set to a user-defined module (application)
@@ -2935,6 +2939,35 @@ void VolumeGVDB::CopyLinearChannelToTextureChannel(int chanDst, int chanSrc)
 	cudaCheck(
 		cuLaunchKernel(cuFunc[FUNC_COPY_LINEAR_CHANNEL_TO_TEXTURE_CHANNEL_F], blockX, blockY, blockZ, blockSize, blockSize, blockSize, 0, NULL, args, NULL),
 		"VolumeGVDB", "CopyLinearChannelToTextureChannel", "cuLaunch", "FUNC_COPY_LINEAR_CHANNEL_TO_TEXTURE_CHANNEL_F", mbDebug);
+
+	POP_CTX
+}
+
+// TODO: handle data types other than float
+void VolumeGVDB::ConvertLinearMassChannelToTextureLevelSetChannel(int chanDst, int chanSrc)
+{
+	PUSH_CTX
+
+	DataPtr pDst = mPool->getAtlas(chanDst);
+	DataPtr pSrc = mPool->getAtlas(chanSrc);
+
+	Vector3DI axiscnt = pSrc.subdim; // number of bricks on each axis
+	Vector3DI axisres = axiscnt * int(pSrc.stride + pSrc.apron * 2);
+	axisres.z = pSrc.size / (axisres.x * axisres.y * sizeof(float));
+
+	int blockSize = 8;
+	int blockX = (axisres.x + blockSize - 1) / blockSize;
+	int blockY = (axisres.y + blockSize - 1) / blockSize;
+	int blockZ = (axisres.z + blockSize - 1) / blockSize;
+
+	void *args[4] = {
+		&cuVDBInfo,
+		&chanDst,
+		&chanSrc,
+		&axisres};
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_CONVERT_LINEAR_MASS_CHANNEL_TO_TEXTURE_LEVEL_SET_CHANNEL_F], blockX, blockY, blockZ, blockSize, blockSize, blockSize, 0, NULL, args, NULL),
+		"VolumeGVDB", "ConvertLinearMassChannelToTextureLevelSetChannel", "cuLaunch", "FUNC_CONVERT_LINEAR_MASS_CHANNEL_TO_TEXTURE_LEVEL_SET_CHANNEL_F", mbDebug);
 
 	POP_CTX
 }
@@ -6324,7 +6357,7 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 		&mAux[AUX_PARTICLE_CELL_FLAG].gpu,
 		&mVDBInfo.vdel[0],
 		&brickWidthInVoxels,
-		&mVDBInfo.atlas_res,
+		&mVDBInfo.atlas_res, // Assumes atlas size (including apron size) is equal for all channels
 		&trans.x,
 		&chanLevelSet
 	};
@@ -6335,6 +6368,68 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 	);
 
 	PERF_POP();
+
+	PERF_POP();
+	POP_CTX
+}
+
+void VolumeGVDB::P2G_ScatterAPIC(int num_pnts, int chanMass, int chanMomentum, int chanForce)
+{
+	const int blockSize = 512;
+	const int gridSize = (num_pnts + blockSize - 1) / blockSize;
+
+	PrepareVDB();
+	PUSH_CTX
+	PERF_PUSH("P2G_ScatterAPIC");
+
+	void *args[12] = {
+		&cuVDBInfo,
+		&num_pnts,
+		&mAux[AUX_PNTPOS].gpu,
+		&mAux[AUX_PNTMASS].gpu,
+		&mAux[AUX_PNTVEL].gpu,
+		&mAux[AUX_PNTDEFGRADIENT].gpu,
+		&mAux[AUX_PNTAFFINESTATE].gpu,
+		&mAux[AUX_PNTINITIALVOLUME].gpu,
+		&chanMass,
+		&chanMomentum,
+		&chanForce,
+		&mVDBInfo.atlas_res // Assumes atlas size (including apron size) is equal for all channels
+	};
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_P2G_SCATTER_APIC], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, args, NULL),
+		"VolumeGVDB", "P2G_ScatterAPIC", "cuLaunch",
+		"FUNC_P2G_SCATTER_APIC", mbDebug
+	);
+
+	PERF_POP();
+	POP_CTX
+}
+
+void VolumeGVDB::G2P_GatherAPIC(int num_pnts, int chanMass, int chanMomentum)
+{
+	const int blockSize = 512;
+	const int gridSize = (num_pnts + blockSize - 1) / blockSize;
+
+	PrepareVDB();
+	PUSH_CTX
+	PERF_PUSH("G2P_GatherAPIC");
+
+	void *args[8] = {
+		&cuVDBInfo,
+		&num_pnts,
+		&mAux[AUX_PNTPOS].gpu,
+		&mAux[AUX_PNTVEL].gpu,
+		&mAux[AUX_PNTDEFGRADIENT].gpu,
+		&mAux[AUX_PNTAFFINESTATE].gpu,
+		&chanMass,
+		&chanMomentum
+	};
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_G2P_GATHER_APIC], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, args, NULL),
+		"VolumeGVDB", "G2P_GatherAPIC", "cuLaunch",
+		"FUNC_G2P_GATHER_APIC", mbDebug
+	);
 
 	PERF_POP();
 	POP_CTX

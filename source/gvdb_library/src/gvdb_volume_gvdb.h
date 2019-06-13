@@ -193,18 +193,18 @@
 	#define FUNC_GATHER_LEVELSET_FP16		53
 	#define FUNC_SCATTER_LEVEL_SET 55
 	#define FUNC_SCATTER_REDUCE_LEVEL_SET 56
-	
+
 	// Topology
 	#define FUNC_FIND_ACTIV_BRICKS	60
 	#define FUNC_BITONIC_SORT		61
 	#define FUNC_CALC_BRICK_ID		62
 	#define FUNC_RADIX_SUM			63
 	#define FUNC_RADIX_PREFIXSUM	64
-	#define FUNC_RADIX_SHUFFLE		65 
+	#define FUNC_RADIX_SHUFFLE		65
 	#define FUNC_FIND_UNIQUE		66
 	#define FUNC_COMPACT_UNIQUE		67
 	#define FUNC_LINK_BRICKS		68
-	
+
 	// Incremental Topology
 	#define FUNC_CALC_EXTRA_BRICK_ID	70
 	#define FUNC_CALC_INCRE_BRICK_ID	71
@@ -244,6 +244,10 @@
 	#define FUNC_MARK_PARTICLE_FLAGS 154
 	#define FUNC_COMPUTE_BRICK_FLAG_OFFSETS 155
 	#define FUNC_MARK_PARTICLE_BLOCK_FLAG 156
+
+	#define FUNC_P2G_SCATTER_APIC	160
+	#define FUNC_G2P_GATHER_APIC	163
+	#define FUNC_CONVERT_LINEAR_MASS_CHANNEL_TO_TEXTURE_LEVEL_SET_CHANNEL_F 170
 
 	#define MAX_FUNC				255
 
@@ -574,6 +578,9 @@
 			void ScatterLevelSet(int num_pnts, float radius, Vector3DF trans, int chanLevelSet);
 			void ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, int chanLevelSet);
 
+			void P2G_ScatterAPIC(int num_pnts, int chanMass, int chanMomentum, int chanForce);
+			void G2P_GatherAPIC(int num_pnts, int chanMass, int chanMomentum);
+
 			void ConvertAndTransform(DataPtr& psrc, char psrcbits, DataPtr& pdest, char pdestbits, int num_pnts, Vector3DF wMin, Vector3DF wMax, Vector3DF trans, Vector3DF scal);
 
 			// Misc info
@@ -583,6 +590,7 @@
 			void GetMinMaxVel(int num_pnts);
 			void CopyChannel(int chanDst, int chanSrc);
 			void CopyLinearChannelToTextureChannel(int chanDst, int chanSrc);
+			void ConvertLinearMassChannelToTextureLevelSetChannel(int chanDst, int chanSrc);
 			void CompareChannels(int chanActual, int chanExpected);
 			char* GetTestPtr();
 			void PrintMemUsage();
