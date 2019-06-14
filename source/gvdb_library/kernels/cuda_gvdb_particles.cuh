@@ -1909,3 +1909,41 @@ extern "C" __global__ void markParticleBlockFlag(
 		}
 	}
 }
+
+extern "C" __global__ void MPM_UpdateGrid(
+	VDBInfo* gvdb, float deltaTime, int chanMass, int chanMomentum, int chanForce,
+	int3 atlasSize, int3 dimensions
+) {
+	uint3 idx = blockIdx * make_uint3(blockDim.x, blockDim.y, blockDim.z) + threadIdx;
+	if (idx.x < dimensions.x && idx.y < dimensions.y && idx.z < dimensions.z) {
+		unsigned long int atlasIndex = idx.z * atlasSize.x * atlasSize.y + idx.y * atlasSize.x + idx.x;
+		float mass = *((float*) gvdb->atlas_dev_mem[chanMass] + atlasIndex);
+		float3 momentum = make_float3(
+			*((float*) gvdb->atlas_dev_mem[chanMomentum] + atlasIndex),
+			*((float*) gvdb->atlas_dev_mem[chanMomentum + 1] + atlasIndex),
+			*((float*) gvdb->atlas_dev_mem[chanMomentum + 2] + atlasIndex)
+		);
+		float3 force = make_float3(
+			*((float*) gvdb->atlas_dev_mem[chanForce] + atlasIndex),
+			*((float*) gvdb->atlas_dev_mem[chanForce + 1] + atlasIndex),
+			*((float*) gvdb->atlas_dev_mem[chanForce + 2] + atlasIndex)
+		);
+
+		// Apply external force (gravity)
+		const float g = 980.0f; // cm/s^2
+		force.y -= mass * g;
+
+		// Velocity update
+		float3 velocity = make_float3(0.0, 0.0, 0.0);
+		if (mass > 0.0) {
+			velocity = (momentum + deltaTime * force) / mass;
+
+			// TODO: Apply collision with ground
+
+			// Save calculated velocity back to momentum channel
+			*((float*) gvdb->atlas_dev_mem[chanMomentum] + atlasIndex) = velocity.x;
+			*((float*) gvdb->atlas_dev_mem[chanMomentum + 1] + atlasIndex) = velocity.y;
+			*((float*) gvdb->atlas_dev_mem[chanMomentum + 2] + atlasIndex) = velocity.z;
+		}
+	}
+}

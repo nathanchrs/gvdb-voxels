@@ -246,7 +246,8 @@
 	#define FUNC_MARK_PARTICLE_BLOCK_FLAG 156
 
 	#define FUNC_P2G_SCATTER_APIC	160
-	#define FUNC_G2P_GATHER_APIC	163
+	#define FUNC_MPM_GRID_UPDATE	164
+	#define FUNC_G2P_GATHER_APIC	165
 	#define FUNC_CONVERT_LINEAR_MASS_CHANNEL_TO_TEXTURE_LEVEL_SET_CHANNEL_F 170
 
 	#define MAX_FUNC				255
@@ -580,6 +581,7 @@
 
 			void P2G_ScatterAPIC(int num_pnts, int chanMass, int chanMomentum, int chanForce);
 			void G2P_GatherAPIC(int num_pnts, int chanMass, int chanMomentum);
+			void MPM_GridUpdate(float deltaTime, int chanMass, int chanMomentum, int chanForce);
 
 			void ConvertAndTransform(DataPtr& psrc, char psrcbits, DataPtr& pdest, char pdestbits, int num_pnts, Vector3DF wMin, Vector3DF wMax, Vector3DF trans, Vector3DF scal);
 

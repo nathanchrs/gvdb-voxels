@@ -358,6 +358,7 @@ void VolumeGVDB::SetCudaDevice ( int devid, CUcontext ctx )
 	LoadFunction ( FUNC_MARK_PARTICLE_BLOCK_FLAG, "markParticleBlockFlag", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 
 	LoadFunction ( FUNC_P2G_SCATTER_APIC, "P2G_ScatterAPIC", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
+	LoadFunction ( FUNC_MPM_GRID_UPDATE, "MPM_GridUpdate", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_G2P_GATHER_APIC, "G2P_GatherAPIC", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_CONVERT_LINEAR_MASS_CHANNEL_TO_TEXTURE_LEVEL_SET_CHANNEL_F, "convertLinearMassChannelToTextureLevelSetChannelF", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 
@@ -6651,6 +6652,39 @@ void VolumeGVDB::CompareChannels(int chanActual, int chanExpected)
 		"VolumeGVDB", "CompareChannels", "cuMemFree", "differingCellCount", mbDebug);
 
 	gprintf("Result:.\n  Cells compared: %d\n  Differing cells: %d\n", comparedCellCount, differingCellCount);
+
+	POP_CTX
+}
+
+void VolumeGVDB::MPM_GridUpdate(float deltaTime, int chanMass, int chanMomentum, int chanForce)
+{
+	PUSH_CTX
+
+	DataPtr pMass = mPool->getAtlas(chanMass);
+	DataPtr pMomentum = mPool->getAtlas(chanMomentum);
+	DataPtr pForce = mPool->getAtlas(chanForce);
+
+	Vector3DI axiscnt = pMass.subdim; // number of bricks on each axis - assume dimensions and apron equal for all channels
+	Vector3DI axisres = axiscnt * int(pMass.stride + pMass.apron * 2);
+	axisres.z = pMass.size / (axisres.x * axisres.y * sizeof(float));
+
+	int blockSize = 8;
+	int blockX = (axisres.x + blockSize - 1) / blockSize;
+	int blockY = (axisres.y + blockSize - 1) / blockSize;
+	int blockZ = (axisres.z + blockSize - 1) / blockSize;
+
+	void *args[7] = {
+		&cuVDBInfo,
+		&deltaTime,
+		&chanMass,
+		&chanMomentum,
+		&chanForce,
+		&mVDBInfo.atlas_res, // Assumes atlas size (including apron size) is equal for all channels
+		&axisres
+	};
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_MPM_GRID_UPDATE], blockX, blockY, blockZ, blockSize, blockSize, blockSize, 0, NULL, args, NULL),
+		"VolumeGVDB", "MPM_GridUpdate", "cuLaunch", "FUNC_MPM_GRID_UPDATE", mbDebug);
 
 	POP_CTX
 }
