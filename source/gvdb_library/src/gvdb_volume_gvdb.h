@@ -285,7 +285,6 @@
 	#define AUX_PNTMASS				24
 	#define AUX_PNTDEFGRADIENT		25
 	#define AUX_PNTAFFINESTATE		26
-	#define AUX_PNTINITIALVOLUME	27
 
 	// Topology
 	#define AUX_PBRICKDX			30
@@ -556,7 +555,7 @@
 
 			void SetPoints(
 				DataPtr &pointPositions, DataPtr &pointMasses, DataPtr &pointVelocities,
-				DataPtr &pointDeformationGradients, DataPtr &pointAffineStates, DataPtr &pointInitialVolumes
+				DataPtr &pointDeformationGradients, DataPtr &pointAffineStates
 			);
 
 			void InsertPoints(int num_pnts, Vector3DF trans, bool bPrefix = false);
@@ -579,8 +578,8 @@
 			void ScatterLevelSet(int num_pnts, float radius, Vector3DF trans, int chanLevelSet);
 			void ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, int chanLevelSet);
 
-			void P2G_ScatterAPIC(int num_pnts, int chanMass, int chanMomentum, int chanForce);
-			void G2P_GatherAPIC(int num_pnts, int chanMass, int chanMomentum);
+			void P2G_ScatterAPIC(int num_pnts, float particleInitialVolume, int chanMass, int chanMomentum, int chanForce);
+			void G2P_GatherAPIC(int num_pnts, float deltaTime, int chanVelocity);
 			void MPM_GridUpdate(float deltaTime, int chanMass, int chanMomentum, int chanForce);
 
 			void ConvertAndTransform(DataPtr& psrc, char psrcbits, DataPtr& pdest, char pdestbits, int num_pnts, Vector3DF wMin, Vector3DF wMax, Vector3DF trans, Vector3DF scal);
@@ -588,7 +587,7 @@
 			// Misc info
 			void GetBoundingBox( int num_pnts, Vector3DF pTrans );
 			Vector3DF getBoundMin() { return mPosMin; }
-			Vector3DF getBoundMax() { return mPosMax; }			
+			Vector3DF getBoundMax() { return mPosMax; }
 			void GetMinMaxVel(int num_pnts);
 			void CopyChannel(int chanDst, int chanSrc);
 			void CopyLinearChannelToTextureChannel(int chanDst, int chanSrc);

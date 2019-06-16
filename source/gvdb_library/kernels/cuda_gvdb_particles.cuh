@@ -932,9 +932,9 @@ inline __device__ float3 quadraticWeightGradient(float3 positionDelta, float3 ce
 // Calculates the first Piola-Kirchoff stress tensor (P) from the deformation gradient (F)
 inline __device__ void neoHookeanConstitutiveModel(float(*F)[3], float(*P)[3])
 {
-    const float youngsModulus = 1e8; // (E) g/(cm s^2)
-	const float poissonsRatio = 0.49; // (phi) Similar to rubber
-	const float mu = 0.5* youngsModulus / (1.0 + poissonsRatio);
+    const float youngsModulus = 1e4; // (E) (Pa)
+	const float poissonsRatio = 0.4; // (phi) Similar to rubber (0.4999)
+	const float mu = 0.5 * youngsModulus / (1.0 + poissonsRatio);
 	const float lambda = youngsModulus * poissonsRatio / ((1.0 + poissonsRatio) * (1.0 - 2.0*poissonsRatio));
 
 	float J;
@@ -956,8 +956,8 @@ inline __device__ void neoHookeanConstitutiveModel(float(*F)[3], float(*P)[3])
 extern "C" __global__ void P2G_ScatterAPIC(
 	VDBInfo* gvdb, int num_pnts,
 	float* particlePositions, float* particleMasses, float* particleVelocities,
-	float* particleDeformationGradients, float* particleAffineStates, float* particleInitialVolumes,
-	int chanMass, int chanMomentum, int chanForce, int3 atlasSize
+	float* particleDeformationGradients, float* particleAffineStates, float particleInitialVolume,
+	int chanMass, int chanMomentum, int chanForce, int3 atlasSize, float3 cellDimension
 ) {
     uint i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= num_pnts) return;
@@ -975,15 +975,12 @@ extern "C" __global__ void P2G_ScatterAPIC(
 	); // v_p
 	float (*particleF)[3] = (float(*)[3]) (particleDeformationGradients + i*9); // F_p
 	float (*particleB)[3] = (float(*)[3]) (particleAffineStates + i*9); // B_p
-	float particleInitialVolume = particleInitialVolumes[i]; // V_o
-
-	float3 cellDimension = gvdb->vdel[0];
 
 	for (int dx = -1; dx <= 1; dx++) {
 		for (int dy = -1; dy <= 1; dy++) {
 			for (int dz = -1; dz <= 1; dz++) {
 				// Get GVDB node at the particle point plus offset
-				float3 setPosInWorld = particlePosInWorld + make_float3(((float) dx) + 0.5, ((float) dy) + 0.5, ((float) dz) + 0.5)*gvdb->vdel[0];
+				float3 setPosInWorld = particlePosInWorld + make_float3(((float) dx) + 0.5, ((float) dy) + 0.5, ((float) dz) + 0.5)*cellDimension;
 				float3 offs, brickPosInWorld, vdel;
 				uint64 nodeId;
 				VDBNode* node = getNodeAtPoint(gvdb, setPosInWorld, &offs, &brickPosInWorld, &vdel, &nodeId);
@@ -997,9 +994,9 @@ extern "C" __global__ void P2G_ScatterAPIC(
 				int3 cellIndexInAtlas = brickIndexInAtlas + cellIndexInBrick;
 
 				float3 cellPosInWorld = make_float3(cellIndexInBrick)*cellDimension + brickPosInWorld;
-				float3 positionDelta = cellPosInWorld - particlePosInWorld; // x_i - x_p
-				float weight = quadraticWeight(positionDelta, cellDimension); // w_ip
-				float3 weightGradient = quadraticWeightGradient(positionDelta, cellDimension); // gradient of w_ip
+				float3 positionDelta = (cellPosInWorld - particlePosInWorld) / 100.0; // x_i - x_p, converted from cm (grid units) to m
+				float weight = quadraticWeight(positionDelta, cellDimension / 100.0); // w_ip, converted from cm (grid units) to m
+				float3 weightGradient = quadraticWeightGradient(positionDelta, cellDimension); // gradient of w_ip, converted from cm (grid units) to m
 
 				float valuesToScatter[7];
 
@@ -1054,23 +1051,156 @@ extern "C" __global__ void P2G_ScatterAPIC(
 }
 
 extern "C" __global__ void G2P_GatherAPIC(
-	VDBInfo* gvdb, int num_pnts, float* particlePositions, float* particleVelocities,
+	VDBInfo* gvdb, int num_pnts, float deltaTime, float* particlePositions, float* particleVelocities,
 	float* particleDeformationGradients, float* particleAffineStates,
-	int chanMass, int chanMomentum
+	int chanVelocity, int3 atlasSize, float3 cellDimension
 ) {
     uint i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= num_pnts) return;
 
-	float3 particlePosInWorld = *((float3*) (particlePositions + i*3));
+	float3 particlePosInWorld = make_float3(
+		particlePositions[i*3],
+		particlePositions[i*3 + 1],
+		particlePositions[i*3 + 2]
+	); // x_p
+	float (*particleF)[3] = (float(*)[3]) (particleDeformationGradients + i*9); // F_p
+
+	float3 particleVelocity = make_float3(0.0, 0.0, 0.0); // Next v_p
+
+	float particleAffineState[3][3]; // Next B_p
+	particleAffineState[0][0] = 0.0;
+	particleAffineState[0][1] = 0.0;
+	particleAffineState[0][2] = 0.0;
+	particleAffineState[1][0] = 0.0;
+	particleAffineState[1][1] = 0.0;
+	particleAffineState[1][2] = 0.0;
+	particleAffineState[2][0] = 0.0;
+	particleAffineState[2][1] = 0.0;
+	particleAffineState[2][2] = 0.0;
+
+	float defUpdate[3][3]; // Next v_i x del(w_ip)^T
+	defUpdate[0][0] = 0.0;
+	defUpdate[0][1] = 0.0;
+	defUpdate[0][2] = 0.0;
+	defUpdate[1][0] = 0.0;
+	defUpdate[1][1] = 0.0;
+	defUpdate[1][2] = 0.0;
+	defUpdate[2][0] = 0.0;
+	defUpdate[2][1] = 0.0;
+	defUpdate[2][2] = 0.0;
 
 	for (int dx = -1; dx <= 1; dx++) {
 		for (int dy = -1; dy <= 1; dy++) {
 			for (int dz = -1; dz <= 1; dz++) {
-				// TODO: G2P_GatherAPIC implementation
+				// Get GVDB node at the particle point plus offset
+				float3 setPosInWorld = particlePosInWorld + make_float3(((float) dx) + 0.5, ((float) dy) + 0.5, ((float) dz) + 0.5)*cellDimension;
+				float3 offs, brickPosInWorld, vdel;
+				uint64 nodeId;
+				VDBNode* node = getNodeAtPoint(gvdb, setPosInWorld, &offs, &brickPosInWorld, &vdel, &nodeId);
+				if (node == 0x0) {
+					continue; // If no brick at location, return
+				}
 
+				int3 brickIndexInAtlas = make_int3(node->mValue);
+				float3 setPosInBrick = setPosInWorld - brickPosInWorld;
+				int3 cellIndexInBrick = make_int3(setPosInBrick / cellDimension);
+				int3 cellIndexInAtlas = brickIndexInAtlas + cellIndexInBrick;
+
+				float3 cellPosInWorld = make_float3(cellIndexInBrick)*cellDimension + brickPosInWorld;
+				float3 positionDelta = (cellPosInWorld - particlePosInWorld) / 100.0; // x_i - x_p, converted from cm (grid units) to m
+				float weight = quadraticWeight(positionDelta, cellDimension / 100.0); // w_ip, converted from cm (grid units) to m
+				float3 weightGradient = quadraticWeightGradient(positionDelta, cellDimension); // gradient of w_ip, converted from cm (grid units) to m
+
+				unsigned long int atlasIndex = cellIndexInAtlas.z * atlasSize.x * atlasSize.y +
+					cellIndexInAtlas.y * atlasSize.x + cellIndexInAtlas.x;
+				float3 gridVelocity = make_float3(
+					*(((float*) gvdb->atlas_dev_mem[chanVelocity]) + atlasIndex),
+					*(((float*) gvdb->atlas_dev_mem[chanVelocity + 1]) + atlasIndex),
+					*(((float*) gvdb->atlas_dev_mem[chanVelocity + 2]) + atlasIndex)
+				);
+
+				// Velocity (v_p)
+				particleVelocity += weight * gridVelocity;
+
+				// Affine state (B_p)
+				particleAffineState[0][0] += weight * gridVelocity.x * positionDelta.x;
+				particleAffineState[0][1] += weight * gridVelocity.x * positionDelta.y;
+				particleAffineState[0][2] += weight * gridVelocity.x * positionDelta.z;
+				particleAffineState[1][0] += weight * gridVelocity.y * positionDelta.x;
+				particleAffineState[1][1] += weight * gridVelocity.y * positionDelta.y;
+				particleAffineState[1][2] += weight * gridVelocity.y * positionDelta.z;
+				particleAffineState[2][0] += weight * gridVelocity.z * positionDelta.x;
+				particleAffineState[2][1] += weight * gridVelocity.z * positionDelta.y;
+				particleAffineState[2][2] += weight * gridVelocity.z * positionDelta.z;
+
+				// Deformation update (v_i x del(w_ip)^T)
+				defUpdate[0][0] += gridVelocity.x * weightGradient.x;
+				defUpdate[0][1] += gridVelocity.x * weightGradient.y;
+				defUpdate[0][2] += gridVelocity.x * weightGradient.z;
+				defUpdate[1][0] += gridVelocity.y * weightGradient.x;
+				defUpdate[1][1] += gridVelocity.y * weightGradient.y;
+				defUpdate[1][2] += gridVelocity.y * weightGradient.z;
+				defUpdate[2][0] += gridVelocity.z * weightGradient.x;
+				defUpdate[2][1] += gridVelocity.z * weightGradient.y;
+				defUpdate[2][2] += gridVelocity.z * weightGradient.z;
 			}
 		}
 	}
+
+	// Update particle data from gathered values
+
+	particleVelocities[i*3] = particleVelocity.x;
+	particleVelocities[i*3 + 1] = particleVelocity.y;
+	particleVelocities[i*3 + 2] = particleVelocity.z;
+
+	particleAffineStates[i*9] = particleAffineState[0][0];
+	particleAffineStates[i*9 + 1] = particleAffineState[0][1];
+	particleAffineStates[i*9 + 2] = particleAffineState[0][2];
+	particleAffineStates[i*9 + 3] = particleAffineState[1][0];
+	particleAffineStates[i*9 + 4] = particleAffineState[1][1];
+	particleAffineStates[i*9 + 5] = particleAffineState[1][2];
+	particleAffineStates[i*9 + 6] = particleAffineState[2][0];
+	particleAffineStates[i*9 + 7] = particleAffineState[2][1];
+	particleAffineStates[i*9 + 8] = particleAffineState[2][2];
+
+	defUpdate[0][0] = deltaTime * defUpdate[0][0] + 1.0;
+	defUpdate[0][1] = deltaTime * defUpdate[0][1];
+	defUpdate[0][2] = deltaTime * defUpdate[0][2];
+	defUpdate[1][0] = deltaTime * defUpdate[1][0];
+	defUpdate[1][1] = deltaTime * defUpdate[1][1] + 1.0;
+	defUpdate[1][2] = deltaTime * defUpdate[1][2];
+	defUpdate[2][0] = deltaTime * defUpdate[2][0];
+	defUpdate[2][1] = deltaTime * defUpdate[2][1];
+	defUpdate[2][2] = deltaTime * defUpdate[2][2] + 1.0;
+
+	particleF[0][0] = defUpdate[0][0]*particleF[0][0] + defUpdate[0][1]*particleF[1][0] + defUpdate[0][2]*particleF[2][0];
+	particleF[0][1] = defUpdate[0][0]*particleF[0][1] + defUpdate[0][1]*particleF[1][1] + defUpdate[0][2]*particleF[2][1];
+	particleF[0][2] = defUpdate[0][0]*particleF[0][2] + defUpdate[0][1]*particleF[1][2] + defUpdate[0][2]*particleF[2][2];
+	particleF[1][0] = defUpdate[1][0]*particleF[0][0] + defUpdate[1][1]*particleF[1][0] + defUpdate[1][2]*particleF[2][0];
+	particleF[1][1] = defUpdate[1][0]*particleF[0][1] + defUpdate[1][1]*particleF[1][1] + defUpdate[1][2]*particleF[2][1];
+	particleF[1][2] = defUpdate[1][0]*particleF[0][2] + defUpdate[1][1]*particleF[1][2] + defUpdate[1][2]*particleF[2][2];
+	particleF[2][0] = defUpdate[2][0]*particleF[0][0] + defUpdate[2][1]*particleF[1][0] + defUpdate[2][2]*particleF[2][0];
+	particleF[2][1] = defUpdate[2][0]*particleF[0][1] + defUpdate[2][1]*particleF[1][1] + defUpdate[2][2]*particleF[2][1];
+	particleF[2][2] = defUpdate[2][0]*particleF[0][2] + defUpdate[2][1]*particleF[1][2] + defUpdate[2][2]*particleF[2][2];
+
+	// Advect particles
+	particlePositions[i*3] += deltaTime * particleVelocity.x * 100.0; // convert m/s to cm/s (grid units)
+	particlePositions[i*3 + 1] += deltaTime * particleVelocity.y * 100.0;
+	particlePositions[i*3 + 2] += deltaTime * particleVelocity.z * 100.0;
+
+	/*if (i == 0) { // DEBUG
+		printf(
+			"xp: %f %f %f, vp: %f %f %f\nF: %f %f %f / %f %f %f / %f %f %f\nB: %f %f %f / %f %f %f / %f %f %f\n",
+			particlePositions[i*3], particlePositions[i*3 + 1], particlePositions[i*3 + 2],
+			particleVelocity.x, particleVelocity.y, particleVelocity.z,
+			particleF[0][0], particleF[0][1], particleF[0][2],
+			particleF[1][0], particleF[1][1], particleF[1][2],
+			particleF[2][0], particleF[2][1], particleF[2][2],
+			particleAffineState[0][0], particleAffineState[0][1], particleAffineState[0][2],
+			particleAffineState[1][0], particleAffineState[1][1], particleAffineState[1][2],
+			particleAffineState[2][0], particleAffineState[2][1], particleAffineState[2][2]
+		);
+	}*/
 }
 
 extern "C" __global__ void gvdbAddSupportVoxel (VDBInfo* gvdb, int num_pnts,  float radius, float offset, float amp,
@@ -1819,7 +1949,7 @@ extern "C" __global__ void convertLinearMassChannelToTextureLevelSetChannelF(VDB
 
 		// Convert mass density (0..inf) to level set (inf..-inf, negative is inside)
 		float value = *cell;
-		value = 3.0 - 200.0*value;
+		value = 3.0 - 2e5*value;
 
 		surf3Dwrite(value, gvdb->volOut[chanDst], idx.x * sizeof(float), idx.y, idx.z);
 	}
@@ -1910,7 +2040,7 @@ extern "C" __global__ void markParticleBlockFlag(
 	}
 }
 
-extern "C" __global__ void MPM_UpdateGrid(
+extern "C" __global__ void MPM_GridUpdate(
 	VDBInfo* gvdb, float deltaTime, int chanMass, int chanMomentum, int chanForce,
 	int3 atlasSize, int3 dimensions
 ) {
@@ -1930,20 +2060,20 @@ extern "C" __global__ void MPM_UpdateGrid(
 		);
 
 		// Apply external force (gravity)
-		const float g = 980.0f; // cm/s^2
+		const float g = 9.8f; // m/s^2
 		force.y -= mass * g;
 
 		// Velocity update
 		float3 velocity = make_float3(0.0, 0.0, 0.0);
-		if (mass > 0.0) {
+		if (mass != 0.0) {
 			velocity = (momentum + deltaTime * force) / mass;
 
 			// TODO: Apply collision with ground
-
-			// Save calculated velocity back to momentum channel
-			*((float*) gvdb->atlas_dev_mem[chanMomentum] + atlasIndex) = velocity.x;
-			*((float*) gvdb->atlas_dev_mem[chanMomentum + 1] + atlasIndex) = velocity.y;
-			*((float*) gvdb->atlas_dev_mem[chanMomentum + 2] + atlasIndex) = velocity.z;
 		}
+
+		// Save calculated velocity back to momentum channel
+		*((float*) gvdb->atlas_dev_mem[chanMomentum] + atlasIndex) = velocity.x;
+		*((float*) gvdb->atlas_dev_mem[chanMomentum + 1] + atlasIndex) = velocity.y;
+		*((float*) gvdb->atlas_dev_mem[chanMomentum + 2] + atlasIndex) = velocity.z;
 	}
 }

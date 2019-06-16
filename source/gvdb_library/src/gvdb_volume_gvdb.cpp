@@ -175,7 +175,6 @@ VolumeGVDB::VolumeGVDB ()
 	mAuxName[AUX_PNTMASS] = "PNTMASS";
 	mAuxName[AUX_PNTDEFGRADIENT] = "PNTDEFGRADIENT";
 	mAuxName[AUX_PNTAFFINESTATE] = "PNTAFFINESTATE";
-	mAuxName[AUX_PNTINITIALVOLUME] = "PNTINITIALVOLUME";
 
 	mAuxName[AUX_PBRICKDX] = "PBRICKDX";
 	mAuxName[AUX_ACTIVBRICKCNT] = "ACTIVEBRICKCNT";
@@ -5375,14 +5374,13 @@ void VolumeGVDB::CommitTransferFunc ()
 
 void VolumeGVDB::SetPoints(
 	DataPtr& pointPositions, DataPtr& pointMasses, DataPtr& pointVelocities,
-	DataPtr& pointDeformationGradients, DataPtr& pointAffineStates, DataPtr& pointInitialVolumes
+	DataPtr& pointDeformationGradients, DataPtr& pointAffineStates
 ) {
 	mAux[AUX_PNTPOS] = pointPositions;
 	mAux[AUX_PNTMASS]= pointMasses;
 	mAux[AUX_PNTVEL] = pointVelocities;
 	mAux[AUX_PNTDEFGRADIENT] = pointDeformationGradients;
-	mAux[AUX_PNTAFFINESTATE] = pointAffineStates; // init 0
-	mAux[AUX_PNTINITIALVOLUME] = pointInitialVolumes;
+	mAux[AUX_PNTAFFINESTATE] = pointAffineStates;
 }
 
 void VolumeGVDB::SetDiv ( DataPtr div )
@@ -6374,7 +6372,7 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 	POP_CTX
 }
 
-void VolumeGVDB::P2G_ScatterAPIC(int num_pnts, int chanMass, int chanMomentum, int chanForce)
+void VolumeGVDB::P2G_ScatterAPIC(int num_pnts, float particleInitialVolume, int chanMass, int chanMomentum, int chanForce)
 {
 	const int blockSize = 512;
 	const int gridSize = (num_pnts + blockSize - 1) / blockSize;
@@ -6383,7 +6381,7 @@ void VolumeGVDB::P2G_ScatterAPIC(int num_pnts, int chanMass, int chanMomentum, i
 	PUSH_CTX
 	PERF_PUSH("P2G_ScatterAPIC");
 
-	void *args[12] = {
+	void *args[13] = {
 		&cuVDBInfo,
 		&num_pnts,
 		&mAux[AUX_PNTPOS].gpu,
@@ -6391,11 +6389,12 @@ void VolumeGVDB::P2G_ScatterAPIC(int num_pnts, int chanMass, int chanMomentum, i
 		&mAux[AUX_PNTVEL].gpu,
 		&mAux[AUX_PNTDEFGRADIENT].gpu,
 		&mAux[AUX_PNTAFFINESTATE].gpu,
-		&mAux[AUX_PNTINITIALVOLUME].gpu,
+		&particleInitialVolume,
 		&chanMass,
 		&chanMomentum,
 		&chanForce,
-		&mVDBInfo.atlas_res // Assumes atlas size (including apron size) is equal for all channels
+		&mVDBInfo.atlas_res, // Assumes atlas size (including apron size) is equal for all channels
+		&mVDBInfo.vdel[0]
 	};
 	cudaCheck(
 		cuLaunchKernel(cuFunc[FUNC_P2G_SCATTER_APIC], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, args, NULL),
@@ -6407,7 +6406,7 @@ void VolumeGVDB::P2G_ScatterAPIC(int num_pnts, int chanMass, int chanMomentum, i
 	POP_CTX
 }
 
-void VolumeGVDB::G2P_GatherAPIC(int num_pnts, int chanMass, int chanMomentum)
+void VolumeGVDB::G2P_GatherAPIC(int num_pnts, float deltaTime, int chanVelocity)
 {
 	const int blockSize = 512;
 	const int gridSize = (num_pnts + blockSize - 1) / blockSize;
@@ -6416,15 +6415,17 @@ void VolumeGVDB::G2P_GatherAPIC(int num_pnts, int chanMass, int chanMomentum)
 	PUSH_CTX
 	PERF_PUSH("G2P_GatherAPIC");
 
-	void *args[8] = {
+	void *args[10] = {
 		&cuVDBInfo,
 		&num_pnts,
+		&deltaTime,
 		&mAux[AUX_PNTPOS].gpu,
 		&mAux[AUX_PNTVEL].gpu,
 		&mAux[AUX_PNTDEFGRADIENT].gpu,
 		&mAux[AUX_PNTAFFINESTATE].gpu,
-		&chanMass,
-		&chanMomentum
+		&chanVelocity,
+		&mVDBInfo.atlas_res, // Assumes atlas size (including apron size) is equal for all channels
+		&mVDBInfo.vdel[0]
 	};
 	cudaCheck(
 		cuLaunchKernel(cuFunc[FUNC_G2P_GATHER_APIC], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, args, NULL),
