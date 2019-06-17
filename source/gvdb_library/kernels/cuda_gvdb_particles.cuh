@@ -906,10 +906,15 @@ inline __device__ float quadraticBSpline(float x)
 
 inline __device__ float quadraticBSplineDerivative(float x)
 {
-	x = fabsf(x);
-	if (x < 0.5) return -2.0 * x;
-	if (x < 1.5) return x - 1.5;
-	return 0.0;
+	if (x < 0.0) {
+		if (x > -0.5) return -2.0 * x;
+		if (x > -1.5) return x + 1.5;
+		return 0.0;
+	} else {
+		if (x < 0.5) return -2.0 * x;
+		if (x < 1.5) return x - 1.5;
+		return 0.0;
+	}
 }
 
 inline __device__ float quadraticWeight(float3 positionDelta, float3 cellDimension)
@@ -996,7 +1001,7 @@ extern "C" __global__ void P2G_ScatterAPIC(
 				float3 cellPosInWorld = make_float3(cellIndexInBrick)*cellDimension + brickPosInWorld;
 				float3 positionDelta = (cellPosInWorld - particlePosInWorld) / 100.0; // x_i - x_p, converted from cm (grid units) to m
 				float weight = quadraticWeight(positionDelta, cellDimension / 100.0); // w_ip, converted from cm (grid units) to m
-				float3 weightGradient = quadraticWeightGradient(positionDelta, cellDimension); // gradient of w_ip, converted from cm (grid units) to m
+				float3 weightGradient = quadraticWeightGradient(positionDelta, cellDimension / 100.0); // gradient of w_ip, converted from cm (grid units) to m
 
 				float valuesToScatter[7];
 
@@ -1004,7 +1009,7 @@ extern "C" __global__ void P2G_ScatterAPIC(
 				valuesToScatter[0] = particleMass * weight;
 
 				// Cell momentum (m_i * v_i)
-				float onePerD = 4.0 / (cellDimension.x * cellDimension.x); // 1/D (special case for quadratic weight kernel), assumes cellDimension xyz is the same
+				float onePerD = 4.0 / (cellDimension.x * cellDimension.x / 1e4); // 1/D (special case for quadratic weight kernel), assumes cellDimension xyz is the same, converted from cm (grid units) to m
 				valuesToScatter[1] = particleVelocity.x;
 				valuesToScatter[2] = particleVelocity.y;
 				valuesToScatter[3] = particleVelocity.z;
@@ -1109,7 +1114,7 @@ extern "C" __global__ void G2P_GatherAPIC(
 				float3 cellPosInWorld = make_float3(cellIndexInBrick)*cellDimension + brickPosInWorld;
 				float3 positionDelta = (cellPosInWorld - particlePosInWorld) / 100.0; // x_i - x_p, converted from cm (grid units) to m
 				float weight = quadraticWeight(positionDelta, cellDimension / 100.0); // w_ip, converted from cm (grid units) to m
-				float3 weightGradient = quadraticWeightGradient(positionDelta, cellDimension); // gradient of w_ip, converted from cm (grid units) to m
+				float3 weightGradient = quadraticWeightGradient(positionDelta, cellDimension / 100.0); // gradient of w_ip, converted from cm (grid units) to m
 
 				unsigned long int atlasIndex = cellIndexInAtlas.z * atlasSize.x * atlasSize.y +
 					cellIndexInAtlas.y * atlasSize.x + cellIndexInAtlas.x;
@@ -2068,7 +2073,15 @@ extern "C" __global__ void MPM_GridUpdate(
 		if (mass != 0.0) {
 			velocity = (momentum + deltaTime * force) / mass;
 
-			// TODO: Apply collision with ground
+			// Apply collision with ground
+			float3 cellPosInWorld;
+			getAtlasToWorld(gvdb, idx, cellPosInWorld);
+
+			if (cellPosInWorld.y <= 10.0) {
+				if (velocity.y < 0.0) { // Collision on a slippery surface
+					velocity.y = -velocity.y;
+				}
+			}
 		}
 
 		// Save calculated velocity back to momentum channel
