@@ -805,6 +805,8 @@
 			
 			void SetBias(float b) { m_bias = b; }
 
+			Vector3DF		mVelMin, mVelMax, mVelRange;
+
 	protected:
 			// VDB Settings
 			int				mLogDim[MAXLEV];	// internal res config
@@ -884,7 +886,6 @@
 			bool			mRebuildTopo;
 			int				mCurrDepth;
 			Vector3DF		mPosMin, mPosMax, mPosRange;
-			Vector3DF		mVelMin, mVelMax, mVelRange;
 
 			Vector3DI		mSimBounds;
 			float			mEpsilon;
