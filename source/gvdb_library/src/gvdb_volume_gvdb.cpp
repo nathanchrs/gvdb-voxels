@@ -357,6 +357,7 @@ void VolumeGVDB::SetCudaDevice ( int devid, CUcontext ctx )
 	LoadFunction ( FUNC_MARK_PARTICLE_BLOCK_FLAG, "markParticleBlockFlag", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 
 	LoadFunction ( FUNC_P2G_SCATTER_APIC, "P2G_ScatterAPIC", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
+	LoadFunction ( FUNC_P2G_SCATTER_REDUCE_APIC, "P2G_ScatterReduceAPIC", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_MPM_GRID_UPDATE, "MPM_GridUpdate", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_G2P_GATHER_APIC, "G2P_GatherAPIC", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_CONVERT_LINEAR_MASS_CHANNEL_TO_TEXTURE_LEVEL_SET_CHANNEL_F, "convertLinearMassChannelToTextureLevelSetChannelF", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
@@ -6225,9 +6226,9 @@ void VolumeGVDB::ScatterLevelSet(int num_pnts, float radius, Vector3DF trans, in
 }
 
 void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, int chanLevelSet) {
-	const int blockSize = 256; // TODO: separate preparation blocksize with maxparticlecountperblock and scatter blocksize
+	const int blockSize = 256;
   	const int gridSize = (num_pnts + blockSize - 1) / blockSize;
-	uint maxBlockParticleCount = blockSize;
+	uint maxBlockParticleCount = 256;
 
 	PUSH_CTX
 	PERF_PUSH("ScatterReduceLevelSet");
@@ -6361,7 +6362,7 @@ void VolumeGVDB::ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF tra
 		&chanLevelSet
 	};
 	cudaCheck(
-		cuLaunchKernel(cuFunc[FUNC_SCATTER_REDUCE_LEVEL_SET], (int) scatterBlockCount, 1, 1, blockSize, 1, 1, 0, NULL, scatterArgs, NULL),
+		cuLaunchKernel(cuFunc[FUNC_SCATTER_REDUCE_LEVEL_SET], (int) scatterBlockCount, 1, 1, maxBlockParticleCount, 1, 1, 0, NULL, scatterArgs, NULL),
         "VolumeGVDB", "ScatterReduceLevelSet", "cuLaunch",
         "FUNC_SCATTER_REDUCE_LEVEL_SET", mbDebug
 	);
@@ -6401,6 +6402,156 @@ void VolumeGVDB::P2G_ScatterAPIC(int num_pnts, float particleInitialVolume, int 
 		"VolumeGVDB", "P2G_ScatterAPIC", "cuLaunch",
 		"FUNC_P2G_SCATTER_APIC", mbDebug
 	);
+
+	PERF_POP();
+	POP_CTX
+}
+
+void VolumeGVDB::P2G_ScatterReduceAPIC(int num_pnts, float particleInitialVolume, int chanMass, int chanMomentum, int chanForce)
+{
+	const int blockSize = 256;
+  	const int gridSize = (num_pnts + blockSize - 1) / blockSize;
+	uint maxBlockParticleCount = 256;
+
+	PUSH_CTX
+	PERF_PUSH("P2G_ScatterReduceAPIC");
+
+	PERF_PUSH("P2G_ScatterReduceAPIC_Prepare");
+
+	if (mAux[AUX_SORTED_PARTICLE_INDEX].lastEle < num_pnts) {
+		PrepareAux(AUX_SORTED_PARTICLE_INDEX, num_pnts, sizeof(unsigned int), false, false);
+
+		// Fill particle index array with unsorted particle index (0..num_pnts-1)
+		void *fillParticleIndexArgs[2] = {
+			&num_pnts,
+			&mAux[AUX_SORTED_PARTICLE_INDEX].gpu
+		};
+		cudaCheck(
+			cuLaunchKernel(cuFunc[FUNC_FILL_PARTICLE_INDEX], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, fillParticleIndexArgs, NULL),
+			"VolumeGVDB", "P2G_ScatterReduceAPIC", "cuLaunch", "FUNC_FILL_PARTICLE_INDEX", mbDebug
+		);
+	}
+
+	PrepareAux(AUX_PARTICLE_SORT_KEYS, num_pnts, sizeof(unsigned int), false, false);
+	PrepareAux(AUX_PARTICLE_CELL_FLAG, num_pnts, sizeof(unsigned int), false, false);
+	PrepareAux(AUX_PARTICLE_BRICK_FLAG, num_pnts, sizeof(unsigned int), false, false);
+	PrepareAux(AUX_BRICK_FLAG_OFFSETS, num_pnts, sizeof(unsigned int), false, false);
+
+	int brickWidthWithApronInVoxels = mPool->getAtlasBrickres(chanMass); // Brick width including apron
+	Vector3DI atlasWidthInBricks = mVDBInfo.atlas_res / brickWidthWithApronInVoxels;
+	void *fillParticleSortKeysArgs[9] = {
+		&cuVDBInfo,
+		&num_pnts,
+		&mAux[AUX_PNTPOS].gpu,
+		&mAux[AUX_PNTPOS].subdim.x,
+		&mAux[AUX_PNTPOS].stride,
+		&brickWidthWithApronInVoxels,
+		&atlasWidthInBricks.x,
+		&mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+		&mAux[AUX_SORTED_PARTICLE_INDEX].gpu
+	};
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_FILL_PARTICLE_SORT_KEYS], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, fillParticleSortKeysArgs, NULL),
+		"VolumeGVDB", "P2G_ScatterReduceAPIC", "cuLaunch", "FUNC_FILL_PARTICLE_SORT_KEYS", mbDebug
+	);
+
+	cudppRadixSort(mPlan_particleSort, (void*) mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+		(void*) mAux[AUX_SORTED_PARTICLE_INDEX].gpu, num_pnts);
+
+	void *markParticleFlagsArgs[4] = {
+		&num_pnts,
+		&mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+		&mAux[AUX_PARTICLE_BRICK_FLAG].gpu,
+		&mAux[AUX_PARTICLE_CELL_FLAG].gpu
+	};
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_MARK_PARTICLE_FLAGS], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, markParticleFlagsArgs, NULL),
+		"VolumeGVDB", "P2G_ScatterReduceAPIC", "cuLaunch", "FUNC_MARK_PARTICLE_FLAGS", mbDebug
+	);
+
+	// Compute brick index and offsets
+
+	cudppScan(mPlan_particleScan, (void*) mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+		(void*) mAux[AUX_PARTICLE_BRICK_FLAG].gpu, num_pnts);
+
+	void *computeBrickFlagOffsetsArgs[4] = {
+		&num_pnts,
+		&mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+		&mAux[AUX_PARTICLE_BRICK_FLAG].gpu,
+		&mAux[AUX_BRICK_FLAG_OFFSETS].gpu
+	};
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_COMPUTE_BRICK_FLAG_OFFSETS], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, computeBrickFlagOffsetsArgs, NULL),
+		"VolumeGVDB", "P2G_ScatterReduceAPIC", "cuLaunch", "FUNC_COMPUTE_BRICK_FLAG_OFFSETS", mbDebug
+	);
+
+	void *markParticleBlockFlagArgs[6] = {
+		&num_pnts,
+		&maxBlockParticleCount,
+		&mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+		&mAux[AUX_BRICK_FLAG_OFFSETS].gpu,
+		&mAux[AUX_PARTICLE_CELL_FLAG].gpu,
+		&mAux[AUX_PARTICLE_BRICK_FLAG].gpu
+	};
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_MARK_PARTICLE_BLOCK_FLAG], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, markParticleBlockFlagArgs, NULL),
+		"VolumeGVDB", "P2G_ScatterReduceAPIC", "cuLaunch", "FUNC_MARK_PARTICLE_BLOCK_FLAG", mbDebug
+	);
+
+	// Compute block index and offsets
+
+	cudppScan(mPlan_particleScan, (void*) mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+		(void*) mAux[AUX_PARTICLE_BRICK_FLAG].gpu, num_pnts);
+
+	void *computeBlockFlagOffsetsArgs[4] = {
+		&num_pnts,
+		&mAux[AUX_PARTICLE_SORT_KEYS].gpu,
+		&mAux[AUX_PARTICLE_BRICK_FLAG].gpu,
+		&mAux[AUX_BRICK_FLAG_OFFSETS].gpu
+	};
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_COMPUTE_BRICK_FLAG_OFFSETS], gridSize, 1, 1, blockSize, 1, 1, 0, NULL, computeBlockFlagOffsetsArgs, NULL),
+		"VolumeGVDB", "P2G_ScatterReduceAPIC", "cuLaunch", "FUNC_COMPUTE_BRICK_FLAG_OFFSETS", mbDebug
+	);
+
+	uint scatterBlockCount;
+	uint* d_scatterBlockCount = ((uint*) mAux[AUX_PARTICLE_SORT_KEYS].gpu) + num_pnts - 1;
+	cudaCheck(cuMemcpyDtoH(&scatterBlockCount, (CUdeviceptr) d_scatterBlockCount, sizeof(uint)),
+		"VolumeGVDB", "P2G_ScatterReduceAPIC", "cuMemcpyDtoH", "scatterBlockCount", mbDebug);
+
+	PERF_POP();
+
+	// Actual scattering
+	PERF_PUSH("P2G_ScatterReduceAPIC_Scatter");
+	PrepareVDB();
+
+	int brickWidthInVoxels = mPool->getAtlasBrickwid(chanMass); // Brick width excluding apron
+	void *scatterArgs[17] = {
+		&cuVDBInfo,
+		&num_pnts,
+		&mAux[AUX_PNTPOS].gpu,
+		&mAux[AUX_PNTMASS].gpu,
+		&mAux[AUX_PNTVEL].gpu,
+		&mAux[AUX_PNTDEFGRADIENT].gpu,
+		&mAux[AUX_PNTAFFINESTATE].gpu,
+		&particleInitialVolume,
+		&chanMass,
+		&chanMomentum,
+		&chanForce,
+		&mAux[AUX_BRICK_FLAG_OFFSETS].gpu,
+		&mAux[AUX_SORTED_PARTICLE_INDEX].gpu,
+		&mAux[AUX_PARTICLE_CELL_FLAG].gpu,
+		&mVDBInfo.atlas_res, // Assumes atlas size (including apron size) is equal for all channels
+		&mVDBInfo.vdel[0],
+		&brickWidthInVoxels
+	};
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_P2G_SCATTER_REDUCE_APIC], (int) scatterBlockCount, 1, 1, maxBlockParticleCount, 1, 1, 0, NULL, scatterArgs, NULL),
+		"VolumeGVDB", "P2G_ScatterReduceAPIC", "cuLaunch",
+		"FUNC_P2G_SCATTER_REDUCE_APIC", mbDebug
+	);
+
+	PERF_POP();
 
 	PERF_POP();
 	POP_CTX

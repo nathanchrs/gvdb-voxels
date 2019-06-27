@@ -246,6 +246,7 @@
 	#define FUNC_MARK_PARTICLE_BLOCK_FLAG 156
 
 	#define FUNC_P2G_SCATTER_APIC	160
+	#define FUNC_P2G_SCATTER_REDUCE_APIC	161
 	#define FUNC_MPM_GRID_UPDATE	164
 	#define FUNC_G2P_GATHER_APIC	165
 	#define FUNC_CONVERT_LINEAR_MASS_CHANNEL_TO_TEXTURE_LEVEL_SET_CHANNEL_F 170
@@ -579,6 +580,7 @@
 			void ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, int chanLevelSet);
 
 			void P2G_ScatterAPIC(int num_pnts, float particleInitialVolume, int chanMass, int chanMomentum, int chanForce);
+			void P2G_ScatterReduceAPIC(int num_pnts, float particleInitialVolume, int chanMass, int chanMomentum, int chanForce);
 			void G2P_GatherAPIC(int num_pnts, float deltaTime, int chanVelocity);
 			void MPM_GridUpdate(float deltaTime, int chanMass, int chanMomentum, int chanForce);
 

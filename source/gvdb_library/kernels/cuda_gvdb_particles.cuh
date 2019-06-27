@@ -958,6 +958,49 @@ inline __device__ void neoHookeanConstitutiveModel(float(*F)[3], float(*P)[3])
 	P[2][2] = mu * (F[2][2] - Fit[2][2]) + lambdaTimesLogJ * Fit[2][2];
 }
 
+inline __device__ void P2G_APIC(
+	float3 positionDelta, float particleMass, float3 particleVelocity, float particleInitialVolume,
+	float (*particleF)[3], float (*particleB)[3], float3 cellDimension, float *result
+) {
+	float weight = quadraticWeight(positionDelta, cellDimension / 100.0); // w_ip, converted from cm (grid units) to m
+	float3 weightGradient = quadraticWeightGradient(positionDelta, cellDimension / 100.0); // gradient of w_ip, converted from cm (grid units) to m
+
+	// Cell mass (m_i)
+	result[0] = particleMass * weight;
+
+	// Cell momentum (m_i * v_i)
+	float onePerD = 4.0 / (cellDimension.x * cellDimension.x / 1e4); // 1/D (special case for quadratic weight kernel), assumes cellDimension xyz is the same, converted from cm (grid units) to m
+	result[1] = particleVelocity.x;
+	result[2] = particleVelocity.y;
+	result[3] = particleVelocity.z;
+	result[1] += onePerD * (particleB[0][0]*positionDelta.x + particleB[0][1]*positionDelta.y + particleB[0][2]*positionDelta.z);
+	result[2] += onePerD * (particleB[1][0]*positionDelta.x + particleB[1][1]*positionDelta.y + particleB[1][2]*positionDelta.z);
+	result[3] += onePerD * (particleB[2][0]*positionDelta.x + particleB[2][1]*positionDelta.y + particleB[2][2]*positionDelta.z);
+	result[1] *= result[0];
+	result[2] *= result[0];
+	result[3] *= result[0];
+
+	// Cell force (f_i)
+	float P[3][3]; // First Piola-Kirchoff stress tensor (P)
+	neoHookeanConstitutiveModel(particleF, (float(*)[3]) P);
+	float PxFT[3][3]; // P x transpose(F)
+	PxFT[0][0] = P[0][0]*particleF[0][0] + P[0][1]*particleF[0][1] + P[0][2]*particleF[0][2];
+	PxFT[0][1] = P[0][0]*particleF[1][0] + P[0][1]*particleF[1][1] + P[0][2]*particleF[1][2];
+	PxFT[0][2] = P[0][0]*particleF[2][0] + P[0][1]*particleF[2][1] + P[0][2]*particleF[2][2];
+	PxFT[1][0] = P[1][0]*particleF[0][0] + P[1][1]*particleF[0][1] + P[1][2]*particleF[0][2];
+	PxFT[1][1] = P[1][0]*particleF[1][0] + P[1][1]*particleF[1][1] + P[1][2]*particleF[1][2];
+	PxFT[1][2] = P[1][0]*particleF[2][0] + P[1][1]*particleF[2][1] + P[1][2]*particleF[2][2];
+	PxFT[2][0] = P[2][0]*particleF[0][0] + P[2][1]*particleF[0][1] + P[2][2]*particleF[0][2];
+	PxFT[2][1] = P[2][0]*particleF[1][0] + P[2][1]*particleF[1][1] + P[2][2]*particleF[1][2];
+	PxFT[2][2] = P[2][0]*particleF[2][0] + P[2][1]*particleF[2][1] + P[2][2]*particleF[2][2];
+	result[4] = PxFT[0][0]*weightGradient.x + PxFT[0][1]*weightGradient.y + PxFT[0][2]*weightGradient.z;
+	result[5] = PxFT[1][0]*weightGradient.x + PxFT[1][1]*weightGradient.y + PxFT[1][2]*weightGradient.z;
+	result[6] = PxFT[2][0]*weightGradient.x + PxFT[2][1]*weightGradient.y + PxFT[2][2]*weightGradient.z;
+	result[4] *= -particleInitialVolume;
+	result[5] *= -particleInitialVolume;
+	result[6] *= -particleInitialVolume;
+}
+
 extern "C" __global__ void P2G_ScatterAPIC(
 	VDBInfo* gvdb, int num_pnts,
 	float* particlePositions, float* particleMasses, float* particleVelocities,
@@ -1000,45 +1043,12 @@ extern "C" __global__ void P2G_ScatterAPIC(
 
 				float3 cellPosInWorld = make_float3(cellIndexInBrick)*cellDimension + brickPosInWorld;
 				float3 positionDelta = (cellPosInWorld - particlePosInWorld) / 100.0; // x_i - x_p, converted from cm (grid units) to m
-				float weight = quadraticWeight(positionDelta, cellDimension / 100.0); // w_ip, converted from cm (grid units) to m
-				float3 weightGradient = quadraticWeightGradient(positionDelta, cellDimension / 100.0); // gradient of w_ip, converted from cm (grid units) to m
 
 				float valuesToScatter[7];
-
-				// Cell mass (m_i)
-				valuesToScatter[0] = particleMass * weight;
-
-				// Cell momentum (m_i * v_i)
-				float onePerD = 4.0 / (cellDimension.x * cellDimension.x / 1e4); // 1/D (special case for quadratic weight kernel), assumes cellDimension xyz is the same, converted from cm (grid units) to m
-				valuesToScatter[1] = particleVelocity.x;
-				valuesToScatter[2] = particleVelocity.y;
-				valuesToScatter[3] = particleVelocity.z;
-				valuesToScatter[1] += onePerD * (particleB[0][0]*positionDelta.x + particleB[0][1]*positionDelta.y + particleB[0][2]*positionDelta.z);
-				valuesToScatter[2] += onePerD * (particleB[1][0]*positionDelta.x + particleB[1][1]*positionDelta.y + particleB[1][2]*positionDelta.z);
-				valuesToScatter[3] += onePerD * (particleB[2][0]*positionDelta.x + particleB[2][1]*positionDelta.y + particleB[2][2]*positionDelta.z);
-				valuesToScatter[1] *= valuesToScatter[0];
-				valuesToScatter[2] *= valuesToScatter[0];
-				valuesToScatter[3] *= valuesToScatter[0];
-
-				// Cell force (f_i)
-				float P[3][3]; // First Piola-Kirchoff stress tensor (P)
-				neoHookeanConstitutiveModel(particleF, (float(*)[3]) P);
-				float PxFT[3][3]; // P x transpose(F)
-				PxFT[0][0] = P[0][0]*particleF[0][0] + P[0][1]*particleF[0][1] + P[0][2]*particleF[0][2];
-				PxFT[0][1] = P[0][0]*particleF[1][0] + P[0][1]*particleF[1][1] + P[0][2]*particleF[1][2];
-				PxFT[0][2] = P[0][0]*particleF[2][0] + P[0][1]*particleF[2][1] + P[0][2]*particleF[2][2];
-				PxFT[1][0] = P[1][0]*particleF[0][0] + P[1][1]*particleF[0][1] + P[1][2]*particleF[0][2];
-				PxFT[1][1] = P[1][0]*particleF[1][0] + P[1][1]*particleF[1][1] + P[1][2]*particleF[1][2];
-				PxFT[1][2] = P[1][0]*particleF[2][0] + P[1][1]*particleF[2][1] + P[1][2]*particleF[2][2];
-				PxFT[2][0] = P[2][0]*particleF[0][0] + P[2][1]*particleF[0][1] + P[2][2]*particleF[0][2];
-				PxFT[2][1] = P[2][0]*particleF[1][0] + P[2][1]*particleF[1][1] + P[2][2]*particleF[1][2];
-				PxFT[2][2] = P[2][0]*particleF[2][0] + P[2][1]*particleF[2][1] + P[2][2]*particleF[2][2];
-				valuesToScatter[4] = PxFT[0][0]*weightGradient.x + PxFT[0][1]*weightGradient.y + PxFT[0][2]*weightGradient.z;
-				valuesToScatter[5] = PxFT[1][0]*weightGradient.x + PxFT[1][1]*weightGradient.y + PxFT[1][2]*weightGradient.z;
-				valuesToScatter[6] = PxFT[2][0]*weightGradient.x + PxFT[2][1]*weightGradient.y + PxFT[2][2]*weightGradient.z;
-				valuesToScatter[4] *= -particleInitialVolume;
-				valuesToScatter[5] *= -particleInitialVolume;
-				valuesToScatter[6] *= -particleInitialVolume;
+				P2G_APIC(
+					positionDelta, particleMass, particleVelocity, particleInitialVolume,
+					particleF, particleB, cellDimension, valuesToScatter
+				);
 
 				unsigned long int atlasIndex = cellIndexInAtlas.z * atlasSize.x * atlasSize.y +
 					cellIndexInAtlas.y * atlasSize.x + cellIndexInAtlas.x;
@@ -1050,6 +1060,192 @@ extern "C" __global__ void P2G_ScatterAPIC(
 				atomicAdd(((float*) gvdb->atlas_dev_mem[chanForce]) + atlasIndex, valuesToScatter[4]);
 				atomicAdd(((float*) gvdb->atlas_dev_mem[chanForce + 1]) + atlasIndex, valuesToScatter[5]);
 				atomicAdd(((float*) gvdb->atlas_dev_mem[chanForce + 2]) + atlasIndex, valuesToScatter[6]);
+			}
+		}
+	}
+}
+
+extern "C" __global__ void P2G_ScatterReduceAPIC(
+	VDBInfo* gvdb, int num_pnts,
+	float* particlePositions, float* particleMasses, float* particleVelocities,
+	float* particleDeformationGradients, float* particleAffineStates, float particleInitialVolume,
+	int chanMass, int chanMomentum, int chanForce,
+	uint* blockParticleOffsets, uint* sortedParticleIndex, uint* particleCellFlag,
+	int3 atlasSize, float3 cellDimension, int brickWidthInVoxels
+) {
+	__shared__ float s_brickCache[10][10][10][7]; // Assumes 8x8x8 brick, with apron cells
+	__shared__ float3 s_firstParticlePosInWorld;
+	__shared__ float3 s_particleBrickPosInWorld;
+	__shared__ uint3 s_brickIndexInAtlas[3][3][3];
+
+	float3 particlePosInWorld;
+	float particleMass;
+	float3 particleVelocity;
+	float (*particleF)[3];
+	float (*particleB)[3];
+
+	uint laneIndex = threadIdx.x & 0x1f;
+	bool isCurrentThreadActive = false;
+	bool isCurrentThreadFirstInCell = false;
+
+	// Initialize brickCache
+	for (uint threadOffset = 0; threadOffset < 10*10*10*7; threadOffset += blockDim.x) {
+		uint j = threadOffset + threadIdx.x;
+		if (j < 10*10*10*7) {
+			*((float*) s_brickCache + j) = 0.0;
+		}
+	}
+
+	uint blockParticleOffset = blockParticleOffsets[blockIdx.x];
+	uint nextBlockParticleOffset;
+	if (blockIdx.x == gridDim.x - 1) {
+		nextBlockParticleOffset = num_pnts; // Last block
+	} else {
+		nextBlockParticleOffset = blockParticleOffsets[blockIdx.x + 1];
+	}
+	uint particleCountInCurrentBlock = nextBlockParticleOffset - blockParticleOffset;
+
+	if (threadIdx.x < particleCountInCurrentBlock) { // Thread is assigned to a particle
+		// Load particle data and mark active threads
+		uint particleIndex = blockParticleOffset + threadIdx.x;
+		int i = sortedParticleIndex[particleIndex];
+		particlePosInWorld = make_float3(
+			particlePositions[i*3],
+			particlePositions[i*3 + 1],
+			particlePositions[i*3 + 2]
+		); // x_p
+		particleMass = particleMasses[i]; // m_p
+		particleVelocity = make_float3(
+			particleVelocities[i*3],
+			particleVelocities[i*3 + 1],
+			particleVelocities[i*3 + 2]
+		); // v_p
+		particleF = (float(*)[3]) (particleDeformationGradients + i*9); // F_p
+		particleB = (float(*)[3]) (particleAffineStates + i*9); // B_p
+
+		isCurrentThreadActive = true;
+		isCurrentThreadFirstInCell = particleCellFlag[particleIndex];
+
+		if (threadIdx.x == 0) {
+			s_firstParticlePosInWorld = particlePosInWorld;
+		}
+	}
+
+	__syncthreads();
+
+	// Locate bricks for the current brick and its neighbors
+	for (uint threadOffset = 0; threadOffset < 3*3*3; threadOffset += blockDim.x) {
+		uint j = threadOffset + threadIdx.x;
+		if (j < 3*3*3) {
+			int3 brickIndex = make_int3(j % 3, (j / 3) % 3, j / 9);
+			float3 relativeBrickOffset = make_float3(brickIndex - make_int3(1.0, 1.0, 1.0));
+
+			float3 setPosInWorld = s_firstParticlePosInWorld +
+				cellDimension * (relativeBrickOffset * brickWidthInVoxels + make_float3(0.5, 0.5, 0.5));
+
+			float3 particleBrickPosInWorld, offs, vdel;
+			uint64 nodeId;
+			VDBNode* node = getNodeAtPoint(gvdb, setPosInWorld, &offs, &particleBrickPosInWorld, &vdel, &nodeId);
+			particleBrickPosInWorld -= make_float3(1.0, 1.0, 1.0); // The position returned by getNodeAtPoint excludes brick aprons
+			if (node) {
+				s_brickIndexInAtlas[brickIndex.z][brickIndex.y][brickIndex.x] = make_uint3(node->mValue) - make_uint3(1, 1, 1);
+			} else {
+				// No brick allocated in this position
+				s_brickIndexInAtlas[brickIndex.z][brickIndex.y][brickIndex.x] = make_uint3(0xffffffff, 0xffffffff, 0xffffffff);
+			}
+			if (j == 13) { // Thread loading the brick of the current particle (center brick)
+				s_particleBrickPosInWorld = particleBrickPosInWorld;
+			}
+		}
+	}
+
+	uint activeThreadsMask = __ballot_sync(0xffffffff, isCurrentThreadActive);
+	uint cellFlagMask = __ballot_sync(0xffffffff, isCurrentThreadFirstInCell);
+
+	__syncthreads();
+
+	// Only shuffle between active threads
+	for (int dx = -1; dx <= 1; dx++) {
+		for (int dy = -1; dy <= 1; dy++) {
+			for (int dz = -1; dz <= 1; dz++) {
+				if (activeThreadsMask & (1 << laneIndex)) {
+					float3 setPosInWorld = particlePosInWorld + (make_float3(0.5, 0.5, 0.5) * cellDimension);
+					float3 setPosInBrick = (setPosInWorld - s_particleBrickPosInWorld);
+					int3 particleCellIndexInBrick = make_int3(setPosInBrick / cellDimension);
+					int3 cellIndexInBrick = particleCellIndexInBrick + make_int3(dx, dy, dz);
+					float3 cellPosInWorld = make_float3(cellIndexInBrick)*cellDimension + s_particleBrickPosInWorld;
+					float3 positionDelta = (cellPosInWorld - particlePosInWorld) / 100.0; // x_i - x_p, converted from cm (grid units) to m
+
+					float valuesToScatter[7];
+					P2G_APIC(
+						positionDelta, particleMass, particleVelocity, particleInitialVolume,
+						particleF, particleB, cellDimension, valuesToScatter
+					);
+
+					uint shuffleDestinationMask = (cellFlagMask ^ activeThreadsMask) >> 1;
+					for (uint stride = 1; stride < 32; stride <<= 1) {
+						for (int i = 0; i < 7; i++) {
+							float shuffledValue = __shfl_down_sync(activeThreadsMask, valuesToScatter[i], stride);
+							if (shuffleDestinationMask & (1 << laneIndex)) {
+								valuesToScatter[i] += shuffledValue;
+							}
+						}
+						shuffleDestinationMask &= (shuffleDestinationMask >> stride);
+					}
+
+					if ((cellFlagMask & (1 << laneIndex)) || laneIndex == 0) {
+						float* brickCacheCell = &s_brickCache[cellIndexInBrick.z][cellIndexInBrick.y][cellIndexInBrick.x][0];
+						atomicAdd(brickCacheCell, valuesToScatter[0]);
+						atomicAdd(brickCacheCell + 1, valuesToScatter[1]);
+						atomicAdd(brickCacheCell + 2, valuesToScatter[2]);
+						atomicAdd(brickCacheCell + 3, valuesToScatter[3]);
+						atomicAdd(brickCacheCell + 4, valuesToScatter[4]);
+						atomicAdd(brickCacheCell + 5, valuesToScatter[5]);
+						atomicAdd(brickCacheCell + 6, valuesToScatter[6]);
+					}
+				}
+			}
+		}
+	}
+
+	__syncthreads();
+
+	// Atomic write brickCache contents to the atlas
+	for (uint threadOffset = 0; threadOffset < 10*10*10; threadOffset += blockDim.x) {
+		uint j = threadOffset + threadIdx.x;
+		if (j < 10*10*10) {
+			uint3 cellIndexInParticleBrick = make_uint3(j % 10, (j / 10) % 10, j / 100);
+			int3 brickOffset = make_int3(0, 0, 0);
+			if (cellIndexInParticleBrick.x == 0) {
+				brickOffset.x = -1;
+			} else if (cellIndexInParticleBrick.x == 9) {
+				brickOffset.x = 1;
+			}
+			if (cellIndexInParticleBrick.y == 0) {
+				brickOffset.y = -1;
+			} else if (cellIndexInParticleBrick.y == 9) {
+				brickOffset.y = 1;
+			}
+			if (cellIndexInParticleBrick.z == 0) {
+				brickOffset.z = -1;
+			} else if (cellIndexInParticleBrick.z == 9) {
+				brickOffset.z = 1;
+			}
+			uint3 cellIndexInBrick = make_uint3(make_int3(cellIndexInParticleBrick) - brickOffset*brickWidthInVoxels);
+			uint3 brickIndexInAtlas = s_brickIndexInAtlas[brickOffset.z + 1][brickOffset.y + 1][brickOffset.x + 1];
+			if (brickIndexInAtlas.x != 0xffffffff || brickIndexInAtlas.y != 0xffffffff || brickIndexInAtlas.z != 0xffffffff) {
+				uint3 cellIndexInAtlas = brickIndexInAtlas + cellIndexInBrick;
+				unsigned long int atlasIndex = cellIndexInAtlas.z * atlasSize.x * atlasSize.y +
+								cellIndexInAtlas.y * atlasSize.x + cellIndexInAtlas.x;
+
+				float* brickCacheCell = &s_brickCache[cellIndexInParticleBrick.z][cellIndexInParticleBrick.y][cellIndexInParticleBrick.x][0];
+				atomicAdd(((float*) gvdb->atlas_dev_mem[chanMass]) + atlasIndex, brickCacheCell[0]);
+				atomicAdd(((float*) gvdb->atlas_dev_mem[chanMomentum]) + atlasIndex, brickCacheCell[1]);
+				atomicAdd(((float*) gvdb->atlas_dev_mem[chanMomentum + 1]) + atlasIndex, brickCacheCell[2]);
+				atomicAdd(((float*) gvdb->atlas_dev_mem[chanMomentum + 2]) + atlasIndex, brickCacheCell[3]);
+				atomicAdd(((float*) gvdb->atlas_dev_mem[chanForce]) + atlasIndex, brickCacheCell[4]);
+				atomicAdd(((float*) gvdb->atlas_dev_mem[chanForce + 1]) + atlasIndex, brickCacheCell[5]);
+				atomicAdd(((float*) gvdb->atlas_dev_mem[chanForce + 2]) + atlasIndex, brickCacheCell[6]);
 			}
 		}
 	}
