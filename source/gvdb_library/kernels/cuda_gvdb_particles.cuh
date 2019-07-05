@@ -289,6 +289,55 @@ extern "C" __global__ void gvdbInsertSubcell (
 	}
 }
 
+extern "C" __global__ void gvdbInsertSubcellIndex (
+	VDBInfo* gvdb, int subcell_size, int sc_per_brick, int num_pnts,
+	int* sc_cnt, int* sc_offset, int* sc_mapping,
+	int3 sc_range, float3 ptrans, int res, float radius,
+	char* ppos, int pos_off, int pos_stride, uint* sc_pnt_idx
+) {
+	uint i = blockIdx.x * blockDim.x + threadIdx.x;
+	if ( i >= num_pnts ) return;
+
+	float3 wpos = (*(float3*) (ppos + i*pos_stride + pos_off));
+	if ( wpos.z == NOHIT ) return;							// If position invalid, return.
+	if ( wpos.x < 0 || wpos.y < 0 || wpos.z < 0) return;	// robust test
+	wpos += ptrans;			// add ptrans here to allow check for NOHIT
+
+	int scminx = (int(wpos.x - radius) / subcell_size) * subcell_size;
+	int scminy = (int(wpos.y - radius) / subcell_size) * subcell_size;
+	int scminz = (int(wpos.z - radius) / subcell_size) * subcell_size;
+	int scmaxx = (int(wpos.x + 1 + radius) / subcell_size) * subcell_size;
+	int scmaxy = (int(wpos.y + 1 + radius) / subcell_size) * subcell_size;
+	int scmaxz = (int(wpos.z + 1 + radius) / subcell_size) * subcell_size;
+
+	VDBNode* pnode;
+	int3 scPos, posInNode;
+	int pnodeId, localOffs, offset, sc_idx;
+	for (scPos.x = scminx; scPos.x <= scmaxx; scPos.x += subcell_size)
+	{
+		for (scPos.y = scminy; scPos.y <= scmaxy; scPos.y += subcell_size)
+		{
+			for (scPos.z = scminz; scPos.z <= scmaxz; scPos.z += subcell_size)
+			{
+				pnodeId = getPosLeafParent( gvdb, scPos);
+				if (pnodeId == ID_UNDEFL) continue;
+				//getNode ( 0, pnodeId);
+				pnode = (VDBNode*) (gvdb->nodelist[0] + pnodeId*gvdb->nodewid[0]);
+
+				posInNode = scPos - pnode->mPos;
+				posInNode.x /= subcell_size;
+				posInNode.y /= subcell_size;
+				posInNode.z /= subcell_size;
+				localOffs = (posInNode.z*res + posInNode.y)*res+ posInNode.x;
+
+				sc_idx = sc_mapping[pnodeId] * sc_per_brick + localOffs;
+				offset = atomicAdd( &sc_cnt[sc_idx], (uint) 1);
+				sc_pnt_idx[sc_offset[sc_idx] + offset] = i;
+			}
+		}
+	}
+}
+
 extern "C" __global__ void gvdbCountSubcell (VDBInfo* gvdb, int subcell_size, int sc_per_brick, int num_pnts, char* ppos, int pos_off, int pos_stride, 
 											 int* sc_cnt, int3 sc_range, float3 ptrans, int res, float radius, int num_sc, int* sc_mapping)
 {
@@ -1685,7 +1734,83 @@ extern "C" __global__ void gvdbGatherLevelSet_fp16(VDBInfo* gvdb, int num_pnts, 
 		surf3Dwrite( CLR2INT(clr), gvdb->volOut[chanClr], vox.x * sizeof(float), vox.y, vox.z);
 }
 
+extern "C" __global__ void P2G_GatherAPIC(
+	VDBInfo* gvdb, int num_pnts, int num_sc,
+	int* sc_nid, int* sc_cnt, int* sc_off, int3* sc_pos, uint* sc_pnt_clr,
+	float* particlePositions, float* particleMasses, float* particleVelocities,
+	float* particleDeformationGradients, float* particleAffineStates, float particleInitialVolume,
+	int chanMass, int chanMomentum, int chanForce,
+	int3 atlasSize, float3 cellDimension
+) {
+	int sc_id = blockIdx.x;				// current subcell ID
+	if (sc_id >= num_sc) return;
 
+	int3 wpos = make_int3(
+		sc_pos[sc_id].x + int(threadIdx.x),
+		sc_pos[sc_id].y + int(threadIdx.y),
+		sc_pos[sc_id].z + int(threadIdx.z)
+	);
+
+	VDBNode* node = getNode(gvdb, 0, sc_nid[sc_id]);
+	float3 vmin = node->mPos * gvdb->voxelsize;
+	int3 cellIndexInAtlas = node->mValue + make_int3(
+		(wpos.x - vmin.x) / cellDimension.x,
+		(wpos.y - vmin.y) / cellDimension.y,
+		(wpos.z - vmin.z) / cellDimension.z
+	);
+
+	float gatheredValues[7];
+	gatheredValues[0] = 0.0;
+	gatheredValues[1] = 0.0;
+	gatheredValues[2] = 0.0;
+	gatheredValues[3] = 0.0;
+	gatheredValues[4] = 0.0;
+	gatheredValues[5] = 0.0;
+	gatheredValues[6] = 0.0;
+
+	for (int j = 0; j < sc_cnt[sc_id]; j++) {
+		uint i = sc_pnt_clr[sc_off[sc_id] + j];
+		float3 particlePosInWorld = make_float3(
+			particlePositions[i*3],
+			particlePositions[i*3 + 1],
+			particlePositions[i*3 + 2]
+		); // x_p
+		float particleMass = particleMasses[i]; // m_p
+		float3 particleVelocity = make_float3(
+			particleVelocities[i*3],
+			particleVelocities[i*3 + 1],
+			particleVelocities[i*3 + 2]
+		); // v_p
+		float (*particleF)[3] = (float(*)[3]) (particleDeformationGradients + i*9); // F_p
+		float (*particleB)[3] = (float(*)[3]) (particleAffineStates + i*9); // B_p
+
+		float3 positionDelta = (make_float3(wpos) - particlePosInWorld) / 100.0; // x_i - x_p, converted from cm (grid units) to m
+
+		float result[7];
+		P2G_APIC(
+			positionDelta, particleMass, particleVelocity, particleInitialVolume,
+			particleF, particleB, cellDimension, result
+		);
+		gatheredValues[0] += result[0];
+		gatheredValues[1] += result[1];
+		gatheredValues[2] += result[2];
+		gatheredValues[3] += result[3];
+		gatheredValues[4] += result[4];
+		gatheredValues[5] += result[5];
+		gatheredValues[6] += result[6];
+	}
+
+	unsigned long int atlasIndex = cellIndexInAtlas.z * atlasSize.x * atlasSize.y +
+		cellIndexInAtlas.y * atlasSize.x + cellIndexInAtlas.x;
+
+	*(((float*) gvdb->atlas_dev_mem[chanMass]) + atlasIndex) = gatheredValues[0];
+	*(((float*) gvdb->atlas_dev_mem[chanMomentum]) + atlasIndex) = gatheredValues[1];
+	*(((float*) gvdb->atlas_dev_mem[chanMomentum + 1]) + atlasIndex) = gatheredValues[2];
+	*(((float*) gvdb->atlas_dev_mem[chanMomentum + 2]) + atlasIndex) = gatheredValues[3];
+	*(((float*) gvdb->atlas_dev_mem[chanForce]) + atlasIndex) = gatheredValues[4];
+	*(((float*) gvdb->atlas_dev_mem[chanForce + 1]) + atlasIndex) = gatheredValues[5];
+	*(((float*) gvdb->atlas_dev_mem[chanForce + 2]) + atlasIndex) = gatheredValues[6];
+}
 
 extern "C" __global__ void gvdbCheckVal (VDBInfo* gvdb, float slice, int3 res, int chanVx, int chanVy, int chanVz, int chanVxOld, int chanVyOld, int chanVzOld, float* outbuf1, float* outbuf2 )
 												 

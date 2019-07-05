@@ -317,6 +317,7 @@ void VolumeGVDB::SetCudaDevice ( int devid, CUcontext ctx )
 	LoadFunction ( FUNC_COUNT_SUBCELL,		"gvdbCountSubcell",				MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_INSERT_SUBCELL,		"gvdbInsertSubcell",			MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_INSERT_SUBCELL_FP16,"gvdbInsertSubcell_fp16",		MODL_PRIMARY, CUDA_GVDB_MODULE_PTX);
+	LoadFunction ( FUNC_INSERT_SUBCELL_INDEX, "gvdbInsertSubcellIndex",		MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_GATHER_DENSITY,		"gvdbGatherDensity",			MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_GATHER_LEVELSET,	"gvdbGatherLevelSet",			MODL_PRIMARY, CUDA_GVDB_MODULE_PTX);
 	LoadFunction ( FUNC_GATHER_LEVELSET_FP16, "gvdbGatherLevelSet_fp16", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX);
@@ -358,6 +359,7 @@ void VolumeGVDB::SetCudaDevice ( int devid, CUcontext ctx )
 
 	LoadFunction ( FUNC_P2G_SCATTER_APIC, "P2G_ScatterAPIC", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_P2G_SCATTER_REDUCE_APIC, "P2G_ScatterReduceAPIC", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
+	LoadFunction ( FUNC_P2G_GATHER_APIC, "P2G_GatherAPIC", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_MPM_GRID_UPDATE, "MPM_GridUpdate", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_G2P_GATHER_APIC, "G2P_GatherAPIC", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
 	LoadFunction ( FUNC_CONVERT_LINEAR_MASS_CHANNEL_TO_TEXTURE_LEVEL_SET_CHANNEL_F, "convertLinearMassChannelToTextureLevelSetChannelF", MODL_PRIMARY, CUDA_GVDB_MODULE_PTX );
@@ -5731,6 +5733,106 @@ void VolumeGVDB::InsertPointsSubcell_FP16(int subcell_size, int num_pnts, float 
 	POP_CTX
 }
 
+void VolumeGVDB::InsertPointIndexSubcell(int subcell_size, int num_pnts, Vector3DF trans, int &pSCPntsLength)
+{
+	int numBrick = mPool->getPoolUsedCnt(0, 0);
+	if (numBrick == 0)
+	{
+		gprintf("Warning: InsertPointIndexSubcell yet no bricks exist.\n");
+		return;
+	}
+
+	PrepareVDB();
+
+	PUSH_CTX
+
+	PERF_PUSH("Insert pnt sc");
+
+	int numSCellPerBrick = pow(getRes(0) / subcell_size, 3);
+	int numSCell = numSCellPerBrick * mPool->getPoolUsedCnt(0, 0);
+	int SCDim = getRes(0) / subcell_size;
+	float pRadius = 0.5;
+
+	Vector3DI range = getRange(0) / (getRes(0) / subcell_size);
+
+	int numSCellMapping = mPool->getPoolTotalCnt(0, 0);
+
+	int threads = 512;
+	int pblks = int(numSCellMapping / threads) + 1;
+
+	PrepareAux(AUX_SUBCELL_FLAG, numSCellMapping, sizeof(int), false, true);
+	PrepareAux(AUX_SUBCELL_MAPPING, numSCellMapping, sizeof(int), false);
+
+	void *argsSetFlag[3] = {&cuVDBInfo, &numSCellMapping, &mAux[AUX_SUBCELL_FLAG].gpu};
+	cudaCheck(cuLaunchKernel(cuFunc[FUNC_SET_FLAG_SUBCELL], pblks, 1, 1, threads, 1, 1, 0, NULL, argsSetFlag, NULL),
+			  "VolumeGVDB", "InsertPointIndexSubcell", "cuLaunch", "FUNC_SET_FLAG_SUBCELL", mbDebug);
+	PrefixSum(mAux[AUX_SUBCELL_FLAG].gpu, mAux[AUX_SUBCELL_MAPPING].gpu, numSCellMapping);
+
+	//////////////////////////////////////////////////////////////////////////
+	PERF_PUSH("SC counting");
+
+	// subcell count
+	pblks = int(num_pnts / threads) + 1;
+	PrepareAux(AUX_SUBCELL_CNT, numSCell, sizeof(int), true);
+
+	void *argsCounting[14] = {&cuVDBInfo, &subcell_size, &numSCellPerBrick,
+							  &num_pnts, &mAux[AUX_PNTPOS].gpu, &mAux[AUX_PNTPOS].subdim.x, &mAux[AUX_PNTPOS].stride,
+							  &mAux[AUX_SUBCELL_CNT].gpu, &range.x, &trans.x, &SCDim, &pRadius, &numSCell, &mAux[AUX_SUBCELL_MAPPING].gpu};
+	cudaCheck(cuLaunchKernel(cuFunc[FUNC_COUNT_SUBCELL], pblks, 1, 1, threads, 1, 1, 0, NULL, argsCounting, NULL),
+			  "VolumeGVDB", "InsertPointIndexSubcell", "cuLaunch", "FUNC_COUNT_SUBCELL", mbDebug);
+
+	PERF_POP();
+
+	//////////////////////////////////////////////////////////////////////////
+	// prefixsum
+
+	PERF_PUSH("PrefixSum");
+	PrepareAux(AUX_SUBCELL_PREFIXSUM, numSCell, sizeof(int), true);
+	PrefixSum(mAux[AUX_SUBCELL_CNT].gpu, mAux[AUX_SUBCELL_PREFIXSUM].gpu, numSCell);
+	PERF_POP();
+
+	//////////////////////////////////////////////////////////////////////////
+	PERF_PUSH("Fetching");
+	int offset_last, cnt_last;
+	cudaCheck(cuMemcpyDtoH(&offset_last, mAux[AUX_SUBCELL_PREFIXSUM].gpu + (numSCell - 1) * sizeof(int), sizeof(int)),
+			  "VolumeGVDB", "InsertPointIndexSubcell", "cuMemcpyDtoH", "AUX_SUBCELL_PREFIXSUM", mbDebug);
+	cudaCheck(cuMemcpyDtoH(&cnt_last, mAux[AUX_SUBCELL_CNT].gpu + (numSCell - 1) * sizeof(int), sizeof(int)),
+			  "VolumeGVDB", "InsertPointIndexSubcell", "cuMemcpyDtoH", "AUX_SUBCELL_CNT", mbDebug);
+	pSCPntsLength = offset_last + cnt_last; // total number of subcell points
+	if (pSCPntsLength == 0)
+		return;
+
+	PrepareAux(AUX_SUBCELL_CNT, numSCell, sizeof(int), true);
+	PrepareAux(AUX_SUBCELL_PNT_CLR, pSCPntsLength, sizeof(uint), false);
+	PERF_POP();
+
+	//////////////////////////////////////////////////////////////////////////
+	PERF_PUSH("SC insert");
+	void *argsInsert[15] = {
+		&cuVDBInfo, &subcell_size, &numSCellPerBrick, &num_pnts,
+		&mAux[AUX_SUBCELL_CNT].gpu, &mAux[AUX_SUBCELL_PREFIXSUM].gpu, &mAux[AUX_SUBCELL_MAPPING].gpu,
+		&range.x, &trans.x, &SCDim, &pRadius,
+		&mAux[AUX_PNTPOS].gpu, &mAux[AUX_PNTPOS].subdim.x, &mAux[AUX_PNTPOS].stride, &mAux[AUX_SUBCELL_PNT_CLR].gpu
+	};
+	cudaCheck(cuLaunchKernel(cuFunc[FUNC_INSERT_SUBCELL_INDEX], pblks, 1, 1, threads, 1, 1, 0, NULL, argsInsert, NULL),
+			  "VolumeGVDB", "InsertPointIndexSubcell", "cuLaunch", "FUNC_INSERT_SUBCELL_INDEX", mbDebug);
+	PERF_POP();
+
+	//////////////////////////////////////////////////////////////////////////
+	PERF_PUSH("SC pos");
+	PrepareAux(AUX_SUBCELL_POS, numSCell, sizeof(int3), false);
+	PrepareAux(AUX_SUBCELL_NID, numSCell, sizeof(int), false);
+	void *argsSCPos[10] = {&cuVDBInfo, &mAux[AUX_SUBCELL_NID].gpu, &mAux[AUX_SUBCELL_POS].gpu, &numSCellMapping, &SCDim, &numSCellPerBrick, &subcell_size, &mAux[AUX_SUBCELL_MAPPING].gpu};
+	pblks = int(numSCellMapping / threads) + 1;
+	cudaCheck(cuLaunchKernel(cuFunc[FUNC_CALC_SUBCELL_POS], pblks, 1, 1, threads, 1, 1, 0, NULL, argsSCPos, NULL),
+			  "VolumeGVDB", "InsertPointsSubcell", "cuLaunch", "FUNC_CALC_SUBCELL_POS", mbDebug);
+	PERF_POP();
+
+	PERF_POP();
+
+	POP_CTX
+}
+
 void VolumeGVDB::MapExtraGVDB (int subcell_size)
 {
 	if (!mHasObstacle) return;
@@ -6552,6 +6654,54 @@ void VolumeGVDB::P2G_ScatterReduceAPIC(int num_pnts, float particleInitialVolume
 	);
 
 	PERF_POP();
+
+	PERF_POP();
+	POP_CTX
+}
+
+void VolumeGVDB::P2G_GatherAPIC(int num_pnts, float particleInitialVolume, int chanMass, int chanMomentum, int chanForce)
+{
+	const int blockSize = 512;
+	const int gridSize = (num_pnts + blockSize - 1) / blockSize;
+	const int subcellSize = 4;
+	int scPntLen;
+
+	PrepareVDB();
+	PUSH_CTX
+	PERF_PUSH("P2G_GatherAPIC");
+
+	InsertPointIndexSubcell(subcellSize, num_pnts, Vector3DF(0.0, 0.0, 0.0), scPntLen);
+
+	int numBrick = mPool->getPoolUsedCnt(0, 0);
+	if (!numBrick) {
+		return;
+	}
+	int numSCell = pow(getRes(0) / subcellSize, 3) * numBrick;
+	void *args[19] = {
+		&cuVDBInfo,
+		&num_pnts,
+		&numSCell,
+		&mAux[AUX_SUBCELL_NID].gpu,
+		&mAux[AUX_SUBCELL_CNT].gpu,
+		&mAux[AUX_SUBCELL_PREFIXSUM].gpu,
+		&mAux[AUX_SUBCELL_POS].gpu,
+		&mAux[AUX_SUBCELL_PNT_CLR].gpu,
+		&mAux[AUX_PNTPOS].gpu,
+		&mAux[AUX_PNTMASS].gpu,
+		&mAux[AUX_PNTVEL].gpu,
+		&mAux[AUX_PNTDEFGRADIENT].gpu,
+		&mAux[AUX_PNTAFFINESTATE].gpu,
+		&particleInitialVolume,
+		&chanMass,
+		&chanMomentum,
+		&chanForce,
+		&mVDBInfo.atlas_res, // Assumes atlas size (including apron size) is equal for all channels
+		&mVDBInfo.vdel[0]
+	};
+	cudaCheck(
+		cuLaunchKernel(cuFunc[FUNC_P2G_GATHER_APIC], numSCell, 1, 1, subcellSize, subcellSize, subcellSize, 0, NULL, args, NULL),
+		"VolumeGVDB", "P2G_GatherAPIC", "cuLaunch",
+		"FUNC_P2G_GATHER_APIC", mbDebug);
 
 	PERF_POP();
 	POP_CTX

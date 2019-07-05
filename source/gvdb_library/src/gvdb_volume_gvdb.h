@@ -178,7 +178,7 @@
 	
 	// Gather & Scatter
 	#define FUNC_COUNT_SUBCELL		40
-	#define FUNC_INSERT_SUBCELL		41		
+	#define FUNC_INSERT_SUBCELL		41
 	#define FUNC_INSERT_SUBCELL_FP16	42
 	#define FUNC_CALC_SUBCELL_POS	43
 	#define FUNC_SET_FLAG_SUBCELL	44
@@ -188,11 +188,12 @@
 	#define FUNC_INSERT_SUPPORT_POINTS	48
 	#define FUNC_SCATTER_DENSITY	49
 	#define FUNC_SCATTER_AVG_COL	50
-	#define FUNC_GATHER_DENSITY		51	
+	#define FUNC_GATHER_DENSITY		51
 	#define FUNC_GATHER_LEVELSET	52
 	#define FUNC_GATHER_LEVELSET_FP16		53
 	#define FUNC_SCATTER_LEVEL_SET 55
 	#define FUNC_SCATTER_REDUCE_LEVEL_SET 56
+	#define FUNC_INSERT_SUBCELL_INDEX		58
 
 	// Topology
 	#define FUNC_FIND_ACTIV_BRICKS	60
@@ -247,6 +248,7 @@
 
 	#define FUNC_P2G_SCATTER_APIC	160
 	#define FUNC_P2G_SCATTER_REDUCE_APIC	161
+	#define FUNC_P2G_GATHER_APIC	162
 	#define FUNC_MPM_GRID_UPDATE	164
 	#define FUNC_G2P_GATHER_APIC	165
 	#define FUNC_CONVERT_LINEAR_MASS_CHANNEL_TO_TEXTURE_LEVEL_SET_CHANNEL_F 170
@@ -569,7 +571,8 @@
 
 			void MapExtraGVDB (int subcell_size);
 			void InsertPointsSubcell( int subcell_size, int num_pnts, float pRadius, Vector3DF trans, int& pSCPntsLength );
-			void InsertPointsSubcell_FP16(int subcell_size, int num_pnts, float radius, Vector3DF trans, int& pSCPntsLength);			
+			void InsertPointsSubcell_FP16(int subcell_size, int num_pnts, float radius, Vector3DF trans, int& pSCPntsLength);
+			void InsertPointIndexSubcell(int subcell_size, int num_pnts, Vector3DF trans, int &pSCPntsLength);
 
 			void ScalePntPos(int num_pnts, float scale);
 			void ScatterDensity			(int num_pnts, float radius, float amp, Vector3DF trans, bool expand = true, bool avgColor = false );
@@ -581,6 +584,7 @@
 
 			void P2G_ScatterAPIC(int num_pnts, float particleInitialVolume, int chanMass, int chanMomentum, int chanForce);
 			void P2G_ScatterReduceAPIC(int num_pnts, float particleInitialVolume, int chanMass, int chanMomentum, int chanForce);
+			void P2G_GatherAPIC(int num_pnts, float particleInitialVolume, int chanMass, int chanMomentum, int chanForce);
 			void G2P_GatherAPIC(int num_pnts, float deltaTime, int chanVelocity);
 			void MPM_GridUpdate(float deltaTime, int chanMass, int chanMomentum, int chanForce);
 
