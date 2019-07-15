@@ -986,7 +986,7 @@ inline __device__ float3 quadraticWeightGradient(float3 positionDelta, float3 ce
 // Calculates the first Piola-Kirchoff stress tensor (P) from the deformation gradient (F)
 inline __device__ void neoHookeanConstitutiveModel(float(*F)[3], float(*P)[3])
 {
-    const float youngsModulus = 1e4; // (E) (Pa)
+    const float youngsModulus = 1e5; // (E) (Pa)
 	const float poissonsRatio = 0.4; // (phi) Similar to rubber (0.4999)
 	const float mu = 0.5 * youngsModulus / (1.0 + poissonsRatio);
 	const float lambda = youngsModulus * poissonsRatio / ((1.0 + poissonsRatio) * (1.0 - 2.0*poissonsRatio));
@@ -2398,7 +2398,7 @@ extern "C" __global__ void MPM_GridUpdate(
 			float3 cellPosInWorld;
 			getAtlasToWorld(gvdb, idx, cellPosInWorld);
 
-			if (cellPosInWorld.y <= 10.0) {
+			if (cellPosInWorld.y <= 0.5) {
 				if (velocity.y < 0.0) { // Collision on a slippery surface
 					velocity.y = -velocity.y;
 				}
