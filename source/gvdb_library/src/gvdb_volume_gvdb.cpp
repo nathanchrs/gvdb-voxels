@@ -987,11 +987,11 @@ void VolumeGVDB::RadixSortByByte(int pNumPnts, int pLevDepth)
 	int RADIX = 8;
 	int bits = 7;*/
 
-	int threads = 512;		
+	int threads = 512;
 	int pblks = int(numPnts / threads)+1;
 	int length = pNumPnts * 4;
 
-	PrepareAux ( AUX_SORTED_LEVXYZ, pNumPnts * 4, sizeof(unsigned short), false);
+	PrepareAux ( AUX_SORTED_LEVXYZ, pNumPnts * 16, sizeof(unsigned short), false);
 	//////////////////////////////////////////////////////////////////////////
 	//PrepareAux ( AUX_TMP, pNumPnts * pLevDepth * 4, sizeof(unsigned short), false);
 
@@ -1205,7 +1205,7 @@ void VolumeGVDB::ActivateIncreBricksGPU(int pNumPnts, float pRadius, Vector3DF p
 	int threads = 512;		
 	int pblks = int(pNumPnts / threads)+1;
 
-	PrepareAux ( AUX_BRICK_LEVXYZ, pNumPnts * pRootLev * 4 / Incre_ratio, sizeof(unsigned short), true );
+	PrepareAux ( AUX_BRICK_LEVXYZ, pNumPnts * pRootLev * 16 / Incre_ratio, sizeof(unsigned short), true );
 	PrepareAux ( AUX_EXTRA_BRICK_CNT, 1, sizeof(int), true, true);
 
 	void* argsCalcExtraLevXYZ[12] = { &cuVDBInfo, &pRadius,
@@ -1405,7 +1405,7 @@ void VolumeGVDB::ActivateBricksGPU(int pNumPnts, float pRadius, Vector3DF pOrig,
 
 	CommitData ( mAux[AUX_RANGE_RES] );	
 
-	PrepareAux ( AUX_BRICK_LEVXYZ, pNumPnts * pRootLev * 4, sizeof(unsigned short), false );	// 4 - lev, x, y, z
+	PrepareAux ( AUX_BRICK_LEVXYZ, pNumPnts * pRootLev * 16, sizeof(unsigned short), false );	// 4 - lev, x, y, z
 	
 	void* argsCalcLevXYZ[8] = { &pNumPnts, &pRootLev, &mAux[AUX_RANGE_RES].gpu,
 		&mAux[AUX_PNTPOS].gpu, &mAux[AUX_PNTPOS].subdim.x, &mAux[AUX_PNTPOS].stride,
