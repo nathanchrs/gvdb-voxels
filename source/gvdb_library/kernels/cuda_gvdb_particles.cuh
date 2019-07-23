@@ -26,6 +26,7 @@
 
 #include <stdio.h>
 #include <float.h>
+#include "svd3_cuda.h"
 
 #define RGBA2INT(r,g,b,a)	(				uint((r)*255.0f) +		(uint((g)*255.0f)<<8) +			(uint((b)*255.0f)<<16) +		(uint((a)*255.0f)<<24) )
 #define CLR2INT(c)			(				uint((c.x)*255.0f) +	(uint((c.y)*255.0f)<<8)	+		(uint((c.z)*255.0f)<<16) +		(uint((c.w)*255.0f)<<24 ) )
@@ -1007,6 +1008,53 @@ inline __device__ void neoHookeanConstitutiveModel(float(*F)[3], float(*P)[3])
 	P[2][2] = mu * (F[2][2] - Fit[2][2]) + lambdaTimesLogJ * Fit[2][2];
 }
 
+// Calculates the first Piola-Kirchoff stress tensor (P) from the deformation gradient (F)
+inline __device__ void fixedCorotatedConstitutiveModel(float(*F)[3], float(*P)[3])
+{
+    const float youngsModulus = 1e5; // (E) (Pa)
+	const float poissonsRatio = 0.4; // (phi) Similar to rubber (0.4999)
+	const float mu = 0.5 * youngsModulus / (1.0 + poissonsRatio);
+	const float lambda = youngsModulus * poissonsRatio / ((1.0 + poissonsRatio) * (1.0 - 2.0*poissonsRatio));
+
+	float U[3][3];
+	float S[3];
+	float V[3][3];
+	float R[3][3];
+	float Fit[3][3]; // F^-T = transpose(inverse(F))
+	float J;
+
+	inverseMatrix3x3Transposed(F, (float(*)[3]) Fit, &J);
+
+	// Singular value decomposition
+	svd(
+		F[0][0], F[1][0], F[2][0], F[0][1], F[1][1], F[2][1], F[0][2], F[1][2], F[2][2],
+		U[0][0], U[1][0], U[2][0], U[0][1], U[1][1], U[2][1], U[0][2], U[1][2], U[2][2],
+		S[0], S[1], S[2],
+		V[0][0], V[1][0], V[2][0], V[0][1], V[1][1], V[2][1], V[0][2], V[1][2], V[2][2]
+	);
+
+	// R = U x transpose(T)
+	R[0][0] = U[0][0]*V[0][0] + U[0][1]*V[0][1] + U[0][2]*V[0][2];
+	R[0][1] = U[0][0]*V[1][0] + U[0][1]*V[1][1] + U[0][2]*V[1][2];
+	R[0][2] = U[0][0]*V[2][0] + U[0][1]*V[2][1] + U[0][2]*V[2][2];
+	R[1][0] = U[1][0]*V[0][0] + U[1][1]*V[0][1] + U[1][2]*V[0][2];
+	R[1][1] = U[1][0]*V[1][0] + U[1][1]*V[1][1] + U[1][2]*V[1][2];
+	R[1][2] = U[1][0]*V[2][0] + U[1][1]*V[2][1] + U[1][2]*V[2][2];
+	R[2][0] = U[2][0]*V[0][0] + U[2][1]*V[0][1] + U[2][2]*V[0][2];
+	R[2][1] = U[2][0]*V[1][0] + U[2][1]*V[1][1] + U[2][2]*V[1][2];
+	R[2][2] = U[2][0]*V[2][0] + U[2][1]*V[2][1] + U[2][2]*V[2][2];
+
+	P[0][0] = 2.0 * mu * (F[0][0] - R[0][0]) + lambda * (J - 1.0) * J * Fit[0][0];
+	P[0][1] = 2.0 * mu * (F[0][1] - R[0][1]) + lambda * (J - 1.0) * J * Fit[0][1];
+	P[0][2] = 2.0 * mu * (F[0][2] - R[0][2]) + lambda * (J - 1.0) * J * Fit[0][2];
+	P[1][0] = 2.0 * mu * (F[1][0] - R[1][0]) + lambda * (J - 1.0) * J * Fit[1][0];
+	P[1][1] = 2.0 * mu * (F[1][1] - R[1][1]) + lambda * (J - 1.0) * J * Fit[1][1];
+	P[1][2] = 2.0 * mu * (F[1][2] - R[1][2]) + lambda * (J - 1.0) * J * Fit[1][2];
+	P[2][0] = 2.0 * mu * (F[2][0] - R[2][0]) + lambda * (J - 1.0) * J * Fit[2][0];
+	P[2][1] = 2.0 * mu * (F[2][1] - R[2][1]) + lambda * (J - 1.0) * J * Fit[2][1];
+	P[2][2] = 2.0 * mu * (F[2][2] - R[2][2]) + lambda * (J - 1.0) * J * Fit[2][2];
+}
+
 inline __device__ void P2G_APIC(
 	float3 positionDelta, float particleMass, float3 particleVelocity, float particleInitialVolume,
 	float (*particleF)[3], float (*particleB)[3], float3 cellDimension, float *result
@@ -1031,7 +1079,7 @@ inline __device__ void P2G_APIC(
 
 	// Cell force (f_i)
 	float P[3][3]; // First Piola-Kirchoff stress tensor (P)
-	neoHookeanConstitutiveModel(particleF, (float(*)[3]) P);
+	fixedCorotatedConstitutiveModel(particleF, (float(*)[3]) P);
 	float PxFT[3][3]; // P x transpose(F)
 	PxFT[0][0] = P[0][0]*particleF[0][0] + P[0][1]*particleF[0][1] + P[0][2]*particleF[0][2];
 	PxFT[0][1] = P[0][0]*particleF[1][0] + P[0][1]*particleF[1][1] + P[0][2]*particleF[1][2];
