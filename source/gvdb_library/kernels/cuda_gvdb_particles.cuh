@@ -2446,9 +2446,11 @@ extern "C" __global__ void MPM_GridUpdate(
 			float3 cellPosInWorld;
 			getAtlasToWorld(gvdb, idx, cellPosInWorld);
 
-			if (cellPosInWorld.y <= 0.5) {
+			// Known issue: bugs due to flooring positions by casting to int
+			// Workaround: particle positions must be positive and greater than one brick size
+			if (cellPosInWorld.y < 11.0) {
 				if (velocity.y < 0.0) { // Collision on a slippery surface
-					velocity.y = -velocity.y;
+					velocity.y = 0.0;
 				}
 			}
 		}
