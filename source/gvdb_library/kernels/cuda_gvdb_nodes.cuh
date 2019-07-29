@@ -128,7 +128,7 @@ inline __device__ int getChild ( VDBNode* node, int b )
 #else 
 
 inline __device__ int getChild ( VDBInfo* gvdb, VDBNode* node, int b )
-{	
+{
 	uint64 listid = node->mChildList;
 	uchar clev = uchar( (listid >> 8) & 0xFF );
 	int cndx = listid >> 16;
@@ -205,36 +205,35 @@ inline __device__ VDBNode* getNode ( VDBInfo* gvdb, int lev, int n )
 inline __device__ VDBNode* getNode ( VDBInfo* gvdb, int lev, int n, float3* vmin )
 {
 	VDBNode* node = (VDBNode*) (gvdb->nodelist[lev] + n*gvdb->nodewid[lev]);
-	*vmin = node->mPos * gvdb->voxelsize;	
+	*vmin = node->mPos * gvdb->voxelsize;
 	return node;
 }
 
 // iteratively find the leaf node at the given position
-inline __device__ VDBNode* getNode ( VDBInfo* gvdb, int lev, int start_id, float3 pos, uint64* node_id )
+inline __device__ VDBNode* getNode(VDBInfo* gvdb, int lev, int start_id, float3 pos, uint64* node_id)
 {
-	float3 vmin, vmax;
-	int3 p;
-	int b;
+	float3 vmin;
 	*node_id = ID_UNDEFL;
 
-	VDBNode* node = getNode ( gvdb, lev, start_id, &vmin );		// get starting node
-	while ( lev > 0 && node != 0x0 ) {			
+	VDBNode* node = getNode(gvdb, lev, start_id, &vmin);		// get starting node
+	while (lev > 0 && node) {
 		// is point inside node? if no, exit
-		vmax = vmin + make_float3(gvdb->noderange[lev]) * gvdb->voxelsize; 
-		if ( pos.x < vmin.x || pos.y < vmin.y || pos.z < vmin.z || pos.x >= vmax.x || pos.y >= vmax.y || pos.z >= vmax.z ) {
-			*node_id = ID_UNDEFL; 
-			return 0x0;		
+		float3 vmax = vmin + make_float3(gvdb->noderange[lev]) * gvdb->voxelsize;
+		if (pos.x < vmin.x || pos.y < vmin.y || pos.z < vmin.z || pos.x >= vmax.x || pos.y >= vmax.y || pos.z >= vmax.z) {
+			*node_id = ID_UNDEFL;
+			return 0;
 		}
-		p = make_int3 ( (pos-vmin)/gvdb->vdel[lev] );		// check child bit
-		b = (( (int(p.z) << gvdb->dim[lev]) + int(p.y)) << gvdb->dim[lev]) + int(p.x);
+		int3 p = make_int3((pos-vmin) / gvdb->vdel[lev]);		// check child bit
+		int level_dim = gvdb->dim[lev];
+		int b = (( (p.z << level_dim) + p.y) << level_dim) + p.x;
 		lev--;
-		if ( isBitOn ( gvdb, node, b ) ) {						// child exists, recurse down tree
-			*node_id = getChild ( gvdb, node, b );				// get next node_id
-			node = getNode ( gvdb, lev, *node_id, &vmin );
+		*node_id = getChild(gvdb, node, b);
+		if (*node_id != ID_UNDEF64) {						// child exists, recurse down tree
+			node = getNode(gvdb, lev, *node_id, &vmin);
 		} else {
 			*node_id = ID_UNDEFL;
-			return 0x0;										// no child, exit
-		}		
+			return 0;										// no child, exit
+		}
 	}
 	return node;
 }
