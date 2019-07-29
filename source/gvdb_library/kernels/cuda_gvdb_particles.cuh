@@ -967,14 +967,14 @@ inline __device__ float quadraticBSplineDerivative(float x)
 	}
 }
 
-inline __device__ float quadraticWeight(float3 positionDelta, float3 cellDimension)
+inline __device__ float quadraticWeight(float3 positionDelta, float cellDimension)
 {
-	return quadraticBSpline(positionDelta.x / cellDimension.x)
-		* quadraticBSpline(positionDelta.y / cellDimension.y)
-		* quadraticBSpline(positionDelta.z / cellDimension.z);
+	return quadraticBSpline(positionDelta.x / cellDimension)
+		* quadraticBSpline(positionDelta.y / cellDimension)
+		* quadraticBSpline(positionDelta.z / cellDimension);
 }
 
-inline __device__ float3 quadraticWeightGradient(float3 positionDelta, float3 cellDimension)
+inline __device__ float3 quadraticWeightGradient(float3 positionDelta, float cellDimension)
 {
 	positionDelta /= cellDimension;
 	return make_float3(
@@ -1057,22 +1057,23 @@ inline __device__ void fixedCorotatedConstitutiveModel(float(*F)[3], float(*P)[3
 
 inline __device__ void P2G_APIC(
 	float3 positionDelta, float particleMass, float3 particleVelocity,
-	float (*particleMinVoxPxFT)[3], float (*particleB)[3], float3 cellDimension, float *result
+	float (*particleMinVoxPxFT)[3], float (*particleB)[3], float *result
 ) {
-	float weight = quadraticWeight(positionDelta, cellDimension / 100.0); // w_ip, converted from cm (grid units) to m
-	float3 weightGradient = quadraticWeightGradient(positionDelta, cellDimension / 100.0); // gradient of w_ip, converted from cm (grid units) to m
+	// Assumes cellDimension is 1.0 cm
+	float weight = quadraticWeight(positionDelta, 1e-2); // w_ip, converted from cm (grid units) to m
+	float3 weightGradient = quadraticWeightGradient(positionDelta, 1e-2); // gradient of w_ip, converted from cm (grid units) to m
 
 	// Cell mass (m_i)
 	result[0] = particleMass * weight;
 
 	// Cell momentum (m_i * v_i)
-	float onePerD = 4.0 / (cellDimension.x * cellDimension.x / 1e4); // 1/D (special case for quadratic weight kernel), assumes cellDimension xyz is the same, converted from cm (grid units) to m
-	result[1] = particleVelocity.x;
-	result[2] = particleVelocity.y;
-	result[3] = particleVelocity.z;
-	result[1] += onePerD * (particleB[0][0]*positionDelta.x + particleB[0][1]*positionDelta.y + particleB[0][2]*positionDelta.z);
-	result[2] += onePerD * (particleB[1][0]*positionDelta.x + particleB[1][1]*positionDelta.y + particleB[1][2]*positionDelta.z);
-	result[3] += onePerD * (particleB[2][0]*positionDelta.x + particleB[2][1]*positionDelta.y + particleB[2][2]*positionDelta.z);
+	float onePerD = 4e4; // 1/D = 4 /cellDimension^2 / 4 (special case for quadratic weight kernel), converted from cm (grid units) to m
+	result[1] = onePerD * (particleB[0][0]*positionDelta.x + particleB[0][1]*positionDelta.y + particleB[0][2]*positionDelta.z);
+	result[2] = onePerD * (particleB[1][0]*positionDelta.x + particleB[1][1]*positionDelta.y + particleB[1][2]*positionDelta.z);
+	result[3] = onePerD * (particleB[2][0]*positionDelta.x + particleB[2][1]*positionDelta.y + particleB[2][2]*positionDelta.z);
+	result[1] += particleVelocity.x;
+	result[2] += particleVelocity.y;
+	result[3] += particleVelocity.z;
 	result[1] *= result[0];
 	result[2] *= result[0];
 	result[3] *= result[0];
@@ -1081,7 +1082,6 @@ inline __device__ void P2G_APIC(
 	result[4] = particleMinVoxPxFT[0][0]*weightGradient.x + particleMinVoxPxFT[0][1]*weightGradient.y + particleMinVoxPxFT[0][2]*weightGradient.z;
 	result[5] = particleMinVoxPxFT[1][0]*weightGradient.x + particleMinVoxPxFT[1][1]*weightGradient.y + particleMinVoxPxFT[1][2]*weightGradient.z;
 	result[6] = particleMinVoxPxFT[2][0]*weightGradient.x + particleMinVoxPxFT[2][1]*weightGradient.y + particleMinVoxPxFT[2][2]*weightGradient.z;
-
 }
 
 extern "C" __global__ void MPM_CalculateConstitutiveModel(
@@ -1122,7 +1122,7 @@ extern "C" __global__ void P2G_ScatterAPIC(
 	VDBInfo* gvdb, int num_pnts,
 	float* particlePositions, float* particleMasses, float* particleVelocities,
 	float* particleMinVoxPxFTs, float* particleAffineStates,
-	int chanMass, int chanMomentum, int chanForce, int3 atlasSize, float3 cellDimension
+	int chanMass, int chanMomentum, int chanForce, int3 atlasSize
 ) {
     uint i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= num_pnts) return;
@@ -1145,7 +1145,7 @@ extern "C" __global__ void P2G_ScatterAPIC(
 		for (int dy = -1; dy <= 1; dy++) {
 			for (int dz = -1; dz <= 1; dz++) {
 				// Get GVDB node at the particle point plus offset
-				float3 setPosInWorld = particlePosInWorld + make_float3(((float) dx) + 0.5, ((float) dy) + 0.5, ((float) dz) + 0.5)*cellDimension;
+				float3 setPosInWorld = particlePosInWorld + make_float3(((float) dx) + 0.5, ((float) dy) + 0.5, ((float) dz) + 0.5);
 				float3 offs, brickPosInWorld, vdel;
 				uint64 nodeId;
 				VDBNode* node = getNodeAtPoint(gvdb, setPosInWorld, &offs, &brickPosInWorld, &vdel, &nodeId);
@@ -1155,16 +1155,16 @@ extern "C" __global__ void P2G_ScatterAPIC(
 
 				int3 brickIndexInAtlas = make_int3(node->mValue);
 				float3 setPosInBrick = (setPosInWorld - brickPosInWorld);
-				int3 cellIndexInBrick = make_int3(setPosInBrick / cellDimension);
+				int3 cellIndexInBrick = make_int3(setPosInBrick);
 				int3 cellIndexInAtlas = brickIndexInAtlas + cellIndexInBrick;
 
-				float3 cellPosInWorld = make_float3(cellIndexInBrick)*cellDimension + brickPosInWorld;
+				float3 cellPosInWorld = make_float3(cellIndexInBrick) + brickPosInWorld;
 				float3 positionDelta = (cellPosInWorld - particlePosInWorld) / 100.0; // x_i - x_p, converted from cm (grid units) to m
 
 				float valuesToScatter[7];
 				P2G_APIC(
 					positionDelta, particleMass, particleVelocity,
-					particleMinVoxPxFT, particleB, cellDimension, valuesToScatter
+					particleMinVoxPxFT, particleB, valuesToScatter
 				);
 
 				unsigned long int atlasIndex = cellIndexInAtlas.z * atlasSize.x * atlasSize.y +
@@ -1188,7 +1188,7 @@ extern "C" __global__ void P2G_ScatterReduceAPIC(
 	float* particleMinVoxPxFTs, float* particleAffineStates,
 	int chanMass, int chanMomentum, int chanForce,
 	uint* blockParticleOffsets, uint* sortedParticleIndex, uint* particleCellFlag,
-	int3 atlasSize, float3 cellDimension, int brickWidthInVoxels
+	int3 atlasSize, int brickWidthInVoxels
 ) {
 	__shared__ float s_brickCache[10][10][10][7]; // Assumes 8x8x8 brick, with apron cells
 	__shared__ float3 s_firstParticlePosInWorld;
@@ -1258,7 +1258,7 @@ extern "C" __global__ void P2G_ScatterReduceAPIC(
 			float3 relativeBrickOffset = make_float3(brickIndex - make_int3(1.0, 1.0, 1.0));
 
 			float3 setPosInWorld = s_firstParticlePosInWorld +
-				cellDimension * (relativeBrickOffset * brickWidthInVoxels + make_float3(0.5, 0.5, 0.5));
+				relativeBrickOffset * brickWidthInVoxels + make_float3(0.5, 0.5, 0.5);
 
 			float3 particleBrickPosInWorld, offs, vdel;
 			uint64 nodeId;
@@ -1286,17 +1286,17 @@ extern "C" __global__ void P2G_ScatterReduceAPIC(
 		for (int dy = -1; dy <= 1; dy++) {
 			for (int dz = -1; dz <= 1; dz++) {
 				if (activeThreadsMask & (1 << laneIndex)) {
-					float3 setPosInWorld = particlePosInWorld + (make_float3(0.5, 0.5, 0.5) * cellDimension);
+					float3 setPosInWorld = particlePosInWorld + make_float3(0.5, 0.5, 0.5);
 					float3 setPosInBrick = (setPosInWorld - s_particleBrickPosInWorld);
-					int3 particleCellIndexInBrick = make_int3(setPosInBrick / cellDimension);
+					int3 particleCellIndexInBrick = make_int3(setPosInBrick);
 					int3 cellIndexInBrick = particleCellIndexInBrick + make_int3(dx, dy, dz);
-					float3 cellPosInWorld = make_float3(cellIndexInBrick)*cellDimension + s_particleBrickPosInWorld;
+					float3 cellPosInWorld = make_float3(cellIndexInBrick) + s_particleBrickPosInWorld;
 					float3 positionDelta = (cellPosInWorld - particlePosInWorld) / 100.0; // x_i - x_p, converted from cm (grid units) to m
 
 					float valuesToScatter[7];
 					P2G_APIC(
 						positionDelta, particleMass, particleVelocity,
-						particleMinVoxPxFT, particleB, cellDimension, valuesToScatter
+						particleMinVoxPxFT, particleB, valuesToScatter
 					);
 
 					uint shuffleDestinationMask = (cellFlagMask ^ activeThreadsMask) >> 1;
@@ -1371,7 +1371,7 @@ extern "C" __global__ void P2G_ScatterReduceAPIC(
 extern "C" __global__ void G2P_GatherAPIC(
 	VDBInfo* gvdb, int num_pnts, float deltaTime, float* particlePositions, float* particleVelocities,
 	float* particleDeformationGradients, float* particleAffineStates,
-	int chanVelocity, int3 atlasSize, float3 cellDimension
+	int chanVelocity, int3 atlasSize
 ) {
     uint i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= num_pnts) return;
@@ -1411,7 +1411,7 @@ extern "C" __global__ void G2P_GatherAPIC(
 		for (int dy = -1; dy <= 1; dy++) {
 			for (int dz = -1; dz <= 1; dz++) {
 				// Get GVDB node at the particle point plus offset
-				float3 setPosInWorld = particlePosInWorld + make_float3(((float) dx) + 0.5, ((float) dy) + 0.5, ((float) dz) + 0.5)*cellDimension;
+				float3 setPosInWorld = particlePosInWorld + make_float3(((float) dx) + 0.5, ((float) dy) + 0.5, ((float) dz) + 0.5);
 				float3 offs, brickPosInWorld, vdel;
 				uint64 nodeId;
 				VDBNode* node = getNodeAtPoint(gvdb, setPosInWorld, &offs, &brickPosInWorld, &vdel, &nodeId);
@@ -1421,13 +1421,13 @@ extern "C" __global__ void G2P_GatherAPIC(
 
 				int3 brickIndexInAtlas = make_int3(node->mValue);
 				float3 setPosInBrick = setPosInWorld - brickPosInWorld;
-				int3 cellIndexInBrick = make_int3(setPosInBrick / cellDimension);
+				int3 cellIndexInBrick = make_int3(setPosInBrick);
 				int3 cellIndexInAtlas = brickIndexInAtlas + cellIndexInBrick;
 
-				float3 cellPosInWorld = make_float3(cellIndexInBrick)*cellDimension + brickPosInWorld;
+				float3 cellPosInWorld = make_float3(cellIndexInBrick) + brickPosInWorld;
 				float3 positionDelta = (cellPosInWorld - particlePosInWorld) / 100.0; // x_i - x_p, converted from cm (grid units) to m
-				float weight = quadraticWeight(positionDelta, cellDimension / 100.0); // w_ip, converted from cm (grid units) to m
-				float3 weightGradient = quadraticWeightGradient(positionDelta, cellDimension / 100.0); // gradient of w_ip, converted from cm (grid units) to m
+				float weight = quadraticWeight(positionDelta, 1e-2); // w_ip, converted from cm (grid units) to m
+				float3 weightGradient = quadraticWeightGradient(positionDelta, 1e-2); // gradient of w_ip, converted from cm (grid units) to m
 
 				unsigned long int atlasIndex = cellIndexInAtlas.z * atlasSize.x * atlasSize.y +
 					cellIndexInAtlas.y * atlasSize.x + cellIndexInAtlas.x;
@@ -1808,7 +1808,7 @@ extern "C" __global__ void P2G_GatherAPIC(
 	float* particlePositions, float* particleMasses, float* particleVelocities,
 	float* particleMinVoxPxFTs, float* particleAffineStates,
 	int chanMass, int chanMomentum, int chanForce,
-	int3 atlasSize, float3 cellDimension
+	int3 atlasSize
 ) {
 	int sc_id = blockIdx.x;				// current subcell ID
 	if (sc_id >= num_sc) return;
@@ -1822,9 +1822,9 @@ extern "C" __global__ void P2G_GatherAPIC(
 	VDBNode* node = getNode(gvdb, 0, sc_nid[sc_id]);
 	float3 vmin = node->mPos * gvdb->voxelsize;
 	int3 cellIndexInAtlas = node->mValue + make_int3(
-		(wpos.x - vmin.x) / cellDimension.x,
-		(wpos.y - vmin.y) / cellDimension.y,
-		(wpos.z - vmin.z) / cellDimension.z
+		wpos.x - vmin.x,
+		wpos.y - vmin.y,
+		wpos.z - vmin.z
 	);
 
 	float gatheredValues[7];
@@ -1857,7 +1857,7 @@ extern "C" __global__ void P2G_GatherAPIC(
 		float result[7];
 		P2G_APIC(
 			positionDelta, particleMass, particleVelocity,
-			particleMinVoxPxFT, particleB, cellDimension, result
+			particleMinVoxPxFT, particleB, result
 		);
 		gatheredValues[0] += result[0];
 		gatheredValues[1] += result[1];
