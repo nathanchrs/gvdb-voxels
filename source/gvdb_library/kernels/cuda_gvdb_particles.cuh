@@ -1146,14 +1146,14 @@ extern "C" __global__ void P2G_ScatterAPIC(
 			for (int dz = -1; dz <= 1; dz++) {
 				// Get GVDB node at the particle point plus offset
 				float3 setPosInWorld = particlePosInWorld + make_float3(((float) dx) + 0.5, ((float) dy) + 0.5, ((float) dz) + 0.5);
-				float3 offs, brickPosInWorld, vdel;
 				uint64 nodeId;
-				VDBNode* node = getNodeAtPoint(gvdb, setPosInWorld, &offs, &brickPosInWorld, &vdel, &nodeId);
-				if (node == 0x0) {
+				VDBNode* node = getNode(gvdb, gvdb->top_lev, 0, setPosInWorld, &nodeId);
+				if (!node) {
 					continue; // If no brick at location, return
 				}
-
 				int3 brickIndexInAtlas = make_int3(node->mValue);
+				float3 brickPosInWorld = node->mPos * gvdb->voxelsize;
+
 				float3 setPosInBrick = (setPosInWorld - brickPosInWorld);
 				int3 cellIndexInBrick = make_int3(setPosInBrick);
 				int3 cellIndexInAtlas = brickIndexInAtlas + cellIndexInBrick;
@@ -1260,10 +1260,9 @@ extern "C" __global__ void P2G_ScatterReduceAPIC(
 			float3 setPosInWorld = s_firstParticlePosInWorld +
 				relativeBrickOffset * brickWidthInVoxels + make_float3(0.5, 0.5, 0.5);
 
-			float3 particleBrickPosInWorld, offs, vdel;
 			uint64 nodeId;
-			VDBNode* node = getNodeAtPoint(gvdb, setPosInWorld, &offs, &particleBrickPosInWorld, &vdel, &nodeId);
-			particleBrickPosInWorld -= make_float3(1.0, 1.0, 1.0); // The position returned by getNodeAtPoint excludes brick aprons
+			VDBNode* node = getNode(gvdb, gvdb->top_lev, 0, setPosInWorld, &nodeId);
+
 			if (node) {
 				s_brickIndexInAtlas[brickIndex.z][brickIndex.y][brickIndex.x] = make_uint3(node->mValue) - make_uint3(1, 1, 1);
 			} else {
@@ -1271,7 +1270,7 @@ extern "C" __global__ void P2G_ScatterReduceAPIC(
 				s_brickIndexInAtlas[brickIndex.z][brickIndex.y][brickIndex.x] = make_uint3(0xffffffff, 0xffffffff, 0xffffffff);
 			}
 			if (j == 13) { // Thread loading the brick of the current particle (center brick)
-				s_particleBrickPosInWorld = particleBrickPosInWorld;
+				s_particleBrickPosInWorld = (node->mPos * gvdb->voxelsize) - make_float3(1.0, 1.0, 1.0); // The position returned by getNode excludes brick aprons;
 			}
 		}
 	}
@@ -1412,14 +1411,15 @@ extern "C" __global__ void G2P_GatherAPIC(
 			for (int dz = -1; dz <= 1; dz++) {
 				// Get GVDB node at the particle point plus offset
 				float3 setPosInWorld = particlePosInWorld + make_float3(((float) dx) + 0.5, ((float) dy) + 0.5, ((float) dz) + 0.5);
-				float3 offs, brickPosInWorld, vdel;
 				uint64 nodeId;
-				VDBNode* node = getNodeAtPoint(gvdb, setPosInWorld, &offs, &brickPosInWorld, &vdel, &nodeId);
-				if (node == 0x0) {
+				VDBNode* node = getNode(gvdb, gvdb->top_lev, 0, setPosInWorld, &nodeId);
+				if (!node) {
 					continue; // If no brick at location, return
 				}
 
 				int3 brickIndexInAtlas = make_int3(node->mValue);
+				float3 brickPosInWorld = node->mPos * gvdb->voxelsize;
+
 				float3 setPosInBrick = setPosInWorld - brickPosInWorld;
 				int3 cellIndexInBrick = make_int3(setPosInBrick);
 				int3 cellIndexInAtlas = brickIndexInAtlas + cellIndexInBrick;
