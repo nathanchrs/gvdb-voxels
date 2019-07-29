@@ -1097,25 +1097,25 @@ extern "C" __global__ void MPM_CalculateConstitutiveModel(
 	// Cell force (f_i)
 	float P[3][3]; // First Piola-Kirchoff stress tensor (P)
 	fixedCorotatedConstitutiveModel(particleF, (float(*)[3]) P);
-	float minVoxPxFT[3][3]; // -Vo x P x transpose(F)
-	minVoxPxFT[0][0] = P[0][0]*particleF[0][0] + P[0][1]*particleF[0][1] + P[0][2]*particleF[0][2];
-	minVoxPxFT[0][1] = P[0][0]*particleF[1][0] + P[0][1]*particleF[1][1] + P[0][2]*particleF[1][2];
-	minVoxPxFT[0][2] = P[0][0]*particleF[2][0] + P[0][1]*particleF[2][1] + P[0][2]*particleF[2][2];
-	minVoxPxFT[1][0] = P[1][0]*particleF[0][0] + P[1][1]*particleF[0][1] + P[1][2]*particleF[0][2];
-	minVoxPxFT[1][1] = P[1][0]*particleF[1][0] + P[1][1]*particleF[1][1] + P[1][2]*particleF[1][2];
-	minVoxPxFT[1][2] = P[1][0]*particleF[2][0] + P[1][1]*particleF[2][1] + P[1][2]*particleF[2][2];
-	minVoxPxFT[2][0] = P[2][0]*particleF[0][0] + P[2][1]*particleF[0][1] + P[2][2]*particleF[0][2];
-	minVoxPxFT[2][1] = P[2][0]*particleF[1][0] + P[2][1]*particleF[1][1] + P[2][2]*particleF[1][2];
-	minVoxPxFT[2][2] = P[2][0]*particleF[2][0] + P[2][1]*particleF[2][1] + P[2][2]*particleF[2][2];
-	minVoxPxFT[0][0] *= -particleInitialVolume;
-	minVoxPxFT[0][1] *= -particleInitialVolume;
-	minVoxPxFT[0][2] *= -particleInitialVolume;
-	minVoxPxFT[1][0] *= -particleInitialVolume;
-	minVoxPxFT[1][1] *= -particleInitialVolume;
-	minVoxPxFT[1][2] *= -particleInitialVolume;
-	minVoxPxFT[2][0] *= -particleInitialVolume;
-	minVoxPxFT[2][1] *= -particleInitialVolume;
-	minVoxPxFT[2][2] *= -particleInitialVolume;
+	float PxFT[3][3]; // -Vo x P x transpose(F)
+	PxFT[0][0] = P[0][0]*particleF[0][0] + P[0][1]*particleF[0][1] + P[0][2]*particleF[0][2];
+	PxFT[0][1] = P[0][0]*particleF[1][0] + P[0][1]*particleF[1][1] + P[0][2]*particleF[1][2];
+	PxFT[0][2] = P[0][0]*particleF[2][0] + P[0][1]*particleF[2][1] + P[0][2]*particleF[2][2];
+	PxFT[1][0] = P[1][0]*particleF[0][0] + P[1][1]*particleF[0][1] + P[1][2]*particleF[0][2];
+	PxFT[1][1] = P[1][0]*particleF[1][0] + P[1][1]*particleF[1][1] + P[1][2]*particleF[1][2];
+	PxFT[1][2] = P[1][0]*particleF[2][0] + P[1][1]*particleF[2][1] + P[1][2]*particleF[2][2];
+	PxFT[2][0] = P[2][0]*particleF[0][0] + P[2][1]*particleF[0][1] + P[2][2]*particleF[0][2];
+	PxFT[2][1] = P[2][0]*particleF[1][0] + P[2][1]*particleF[1][1] + P[2][2]*particleF[1][2];
+	PxFT[2][2] = P[2][0]*particleF[2][0] + P[2][1]*particleF[2][1] + P[2][2]*particleF[2][2];
+	particleMinVoxPxFT[0][0] = -particleInitialVolume * PxFT[0][0];
+	particleMinVoxPxFT[0][1] = -particleInitialVolume * PxFT[0][1];
+	particleMinVoxPxFT[0][2] = -particleInitialVolume * PxFT[0][2];
+	particleMinVoxPxFT[1][0] = -particleInitialVolume * PxFT[1][0];
+	particleMinVoxPxFT[1][1] = -particleInitialVolume * PxFT[1][1];
+	particleMinVoxPxFT[1][2] = -particleInitialVolume * PxFT[1][2];
+	particleMinVoxPxFT[2][0] = -particleInitialVolume * PxFT[2][0];
+	particleMinVoxPxFT[2][1] = -particleInitialVolume * PxFT[2][1];
+	particleMinVoxPxFT[2][2] = -particleInitialVolume * PxFT[2][2];
 }
 
 extern "C" __global__ void P2G_ScatterAPIC(
