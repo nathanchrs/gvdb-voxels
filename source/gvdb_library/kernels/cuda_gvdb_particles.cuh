@@ -1160,8 +1160,11 @@ extern "C" __global__ void P2G_ScatterAPIC(
 	float (*particleMinVoxPxFT)[3] = (float(*)[3]) (particleMinVoxPxFTs + i*9); // -Vo x P x transpose(F_p)
 	float (*particleB)[3] = (float(*)[3]) (particleAffineStates + i*9); // B_p
 
+	#pragma unroll
 	for (int dx = -1; dx <= 1; dx++) {
+		#pragma unroll
 		for (int dy = -1; dy <= 1; dy++) {
+			#pragma unroll
 			for (int dz = -1; dz <= 1; dz++) {
 				// Get GVDB node at the particle point plus offset
 				float3 setPosInWorld = particlePosInWorld + make_float3(((float) dx) + 0.5, ((float) dy) + 0.5, ((float) dz) + 0.5);
@@ -1300,8 +1303,11 @@ extern "C" __global__ void P2G_ScatterReduceAPIC(
 	__syncthreads();
 
 	// Only shuffle between active threads
+	#pragma unroll
 	for (int dx = -1; dx <= 1; dx++) {
+		#pragma unroll
 		for (int dy = -1; dy <= 1; dy++) {
+			#pragma unroll
 			for (int dz = -1; dz <= 1; dz++) {
 				if (activeThreadsMask & (1 << laneIndex)) {
 					float3 setPosInWorld = particlePosInWorld + make_float3(0.5, 0.5, 0.5);
@@ -1425,8 +1431,11 @@ extern "C" __global__ void G2P_GatherAPIC(
 	defUpdate[2][1] = 0.0;
 	defUpdate[2][2] = 0.0;
 
+	#pragma unroll
 	for (int dx = -1; dx <= 1; dx++) {
+		#pragma unroll
 		for (int dy = -1; dy <= 1; dy++) {
+			#pragma unroll
 			for (int dz = -1; dz <= 1; dz++) {
 				// Get GVDB node at the particle point plus offset
 				float3 setPosInWorld = particlePosInWorld + make_float3(((float) dx) + 0.5, ((float) dy) + 0.5, ((float) dz) + 0.5);
