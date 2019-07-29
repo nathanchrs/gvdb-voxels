@@ -249,6 +249,7 @@
 	#define FUNC_P2G_SCATTER_APIC	160
 	#define FUNC_P2G_SCATTER_REDUCE_APIC	161
 	#define FUNC_P2G_GATHER_APIC	162
+	#define FUNC_MPM_CALCULATE_CONSTITUTIVE_MODEL	163
 	#define FUNC_MPM_GRID_UPDATE	164
 	#define FUNC_G2P_GATHER_APIC	165
 	#define FUNC_CONVERT_LINEAR_MASS_CHANNEL_TO_TEXTURE_LEVEL_SET_CHANNEL_F 170
@@ -288,6 +289,7 @@
 	#define AUX_PNTMASS				24
 	#define AUX_PNTDEFGRADIENT		25
 	#define AUX_PNTAFFINESTATE		26
+	#define AUX_PNTMINVOXPXFT		27
 
 	// Topology
 	#define AUX_PBRICKDX			30
@@ -558,7 +560,7 @@
 
 			void SetPoints(
 				DataPtr &pointPositions, DataPtr &pointMasses, DataPtr &pointVelocities,
-				DataPtr &pointDeformationGradients, DataPtr &pointAffineStates
+				DataPtr &pointDeformationGradients, DataPtr &pointAffineStates, DataPtr &pointMinVoxPxFTs
 			);
 
 			void InsertPoints(int num_pnts, Vector3DF trans, bool bPrefix = false);
@@ -582,10 +584,11 @@
 			void ScatterLevelSet(int num_pnts, float radius, Vector3DF trans, int chanLevelSet);
 			void ScatterReduceLevelSet(int num_pnts, float radius, Vector3DF trans, int chanLevelSet);
 
-			void P2G_ScatterAPIC(int num_pnts, float particleInitialVolume, int chanMass, int chanMomentum, int chanForce);
-			void P2G_ScatterReduceAPIC(int num_pnts, float particleInitialVolume, int chanMass, int chanMomentum, int chanForce);
-			void P2G_GatherAPIC(int num_pnts, float particleInitialVolume, int chanMass, int chanMomentum, int chanForce);
+			void P2G_ScatterAPIC(int num_pnts, int chanMass, int chanMomentum, int chanForce);
+			void P2G_ScatterReduceAPIC(int num_pnts, int chanMass, int chanMomentum, int chanForce);
+			void P2G_GatherAPIC(int num_pnts, int chanMass, int chanMomentum, int chanForce);
 			void G2P_GatherAPIC(int num_pnts, float deltaTime, int chanVelocity);
+			void MPM_CalculateConstitutiveModel(int num_pnts, float particleInitialVolume);
 			void MPM_GridUpdate(float deltaTime, int chanMass, int chanMomentum, int chanForce);
 
 			void ConvertAndTransform(DataPtr& psrc, char psrcbits, DataPtr& pdest, char pdestbits, int num_pnts, Vector3DF wMin, Vector3DF wMax, Vector3DF trans, Vector3DF scal);
