@@ -967,6 +967,23 @@ inline __device__ float quadraticBSplineDerivative(float x)
 	}
 }
 
+inline __device__ void calculateQuadraticWeightAndGradient(
+	float3 positionDelta, float cellDimension, float* weight, float3* weightGradient
+) {
+	positionDelta /= cellDimension;
+	float3 weightVector = make_float3(
+		quadraticBSpline(positionDelta.x),
+		quadraticBSpline(positionDelta.y),
+		quadraticBSpline(positionDelta.z)
+	);
+	*weight = weightVector.x * weightVector.y * weightVector.z;
+	*weightGradient = make_float3(
+		quadraticBSplineDerivative(positionDelta.x)*weightVector.y*weightVector.z,
+		weightVector.x*quadraticBSplineDerivative(positionDelta.y)*weightVector.z,
+		weightVector.x*weightVector.y*quadraticBSplineDerivative(positionDelta.z)
+	) / cellDimension;
+}
+
 inline __device__ float quadraticWeight(float3 positionDelta, float cellDimension)
 {
 	return quadraticBSpline(positionDelta.x / cellDimension)
@@ -1059,9 +1076,11 @@ inline __device__ void P2G_APIC(
 	float3 positionDelta, float particleMass, float3 particleVelocity,
 	float (*particleMinVoxPxFT)[3], float (*particleB)[3], float *result
 ) {
-	// Assumes cellDimension is 1.0 cm
-	float weight = quadraticWeight(positionDelta, 1e-2); // w_ip, converted from cm (grid units) to m
-	float3 weightGradient = quadraticWeightGradient(positionDelta, 1e-2); // gradient of w_ip, converted from cm (grid units) to m
+	// Assumes cellDimension is 1.0 cm, converted from cm (grid units) to m
+	// w_ip and gradient of w_ip
+	float weight;
+	float3 weightGradient;
+	calculateQuadraticWeightAndGradient(positionDelta, 1e-2, &weight, &weightGradient);
 
 	// Cell mass (m_i)
 	result[0] = particleMass * weight;
@@ -1426,8 +1445,12 @@ extern "C" __global__ void G2P_GatherAPIC(
 
 				float3 cellPosInWorld = make_float3(cellIndexInBrick) + brickPosInWorld;
 				float3 positionDelta = (cellPosInWorld - particlePosInWorld) / 100.0; // x_i - x_p, converted from cm (grid units) to m
-				float weight = quadraticWeight(positionDelta, 1e-2); // w_ip, converted from cm (grid units) to m
-				float3 weightGradient = quadraticWeightGradient(positionDelta, 1e-2); // gradient of w_ip, converted from cm (grid units) to m
+
+				// Assumes cellDimension is 1.0 cm, converted from cm (grid units) to m
+				// w_ip and gradient of w_ip
+				float weight;
+				float3 weightGradient;
+				calculateQuadraticWeightAndGradient(positionDelta, 1e-2, &weight, &weightGradient);
 
 				unsigned long int atlasIndex = cellIndexInAtlas.z * atlasSize.x * atlasSize.y +
 					cellIndexInAtlas.y * atlasSize.x + cellIndexInAtlas.x;
