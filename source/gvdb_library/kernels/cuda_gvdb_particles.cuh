@@ -967,23 +967,21 @@ inline __device__ float quadraticBSplineDerivative(float x)
 	}
 }
 
-// Assumes cellDimension is 1 cm (1e-2 m)
-inline __device__ float quadraticWeight(float3 positionDelta)
+inline __device__ float quadraticWeight(float3 positionDelta, float cellDimension)
 {
-	return quadraticBSpline(positionDelta.x / 1e-2)
-		* quadraticBSpline(positionDelta.y / 1e-2)
-		* quadraticBSpline(positionDelta.z / 1e-2);
+	return quadraticBSpline(positionDelta.x / cellDimension)
+		* quadraticBSpline(positionDelta.y / cellDimension)
+		* quadraticBSpline(positionDelta.z / cellDimension);
 }
 
-// Assumes cellDimension is 1 cm (1e-2 m)
-inline __device__ float3 quadraticWeightGradient(float3 positionDelta)
+inline __device__ float3 quadraticWeightGradient(float3 positionDelta, float cellDimension)
 {
-	positionDelta /= 1e-2;
+	positionDelta /= cellDimension;
 	return make_float3(
 		quadraticBSplineDerivative(positionDelta.x)*quadraticBSpline(positionDelta.y)*quadraticBSpline(positionDelta.z),
 		quadraticBSpline(positionDelta.x)*quadraticBSplineDerivative(positionDelta.y)*quadraticBSpline(positionDelta.z),
 		quadraticBSpline(positionDelta.x)*quadraticBSpline(positionDelta.y)*quadraticBSplineDerivative(positionDelta.z)
-	) / 1e-2;
+	) / cellDimension;
 }
 
 // Calculates the first Piola-Kirchoff stress tensor (P) from the deformation gradient (F)
@@ -1062,8 +1060,8 @@ inline __device__ void P2G_APIC(
 	float (*particleMinVoxPxFT)[3], float (*particleB)[3], float *result
 ) {
 	// Assumes cellDimension is 1.0 cm
-	float weight = quadraticWeight(positionDelta); // w_ip, converted from cm (grid units) to m
-	float3 weightGradient = quadraticWeightGradient(positionDelta); // gradient of w_ip, converted from cm (grid units) to m
+	float weight = quadraticWeight(positionDelta, 1e-2); // w_ip, converted from cm (grid units) to m
+	float3 weightGradient = quadraticWeightGradient(positionDelta, 1e-2); // gradient of w_ip, converted from cm (grid units) to m
 
 	// Cell mass (m_i)
 	result[0] = particleMass * weight;
@@ -1428,8 +1426,8 @@ extern "C" __global__ void G2P_GatherAPIC(
 
 				float3 cellPosInWorld = make_float3(cellIndexInBrick) + brickPosInWorld;
 				float3 positionDelta = (cellPosInWorld - particlePosInWorld) / 100.0; // x_i - x_p, converted from cm (grid units) to m
-				float weight = quadraticWeight(positionDelta); // w_ip, converted from cm (grid units) to m
-				float3 weightGradient = quadraticWeightGradient(positionDelta); // gradient of w_ip, converted from cm (grid units) to m
+				float weight = quadraticWeight(positionDelta, 1e-2); // w_ip, converted from cm (grid units) to m
+				float3 weightGradient = quadraticWeightGradient(positionDelta, 1e-2); // gradient of w_ip, converted from cm (grid units) to m
 
 				unsigned long int atlasIndex = cellIndexInAtlas.z * atlasSize.x * atlasSize.y +
 					cellIndexInAtlas.y * atlasSize.x + cellIndexInAtlas.x;
