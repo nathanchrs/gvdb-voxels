@@ -1376,38 +1376,36 @@ extern "C" __global__ void G2P_GatherAPIC(
     uint i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= num_pnts) return;
 
-	// Shared memory size according to blockDim
-	__shared__ float3 s_particleVelocity[512]; // Next v_p
-	__shared__ float s_particleAffineState[512][3][3]; // Next B_p
-	__shared__ float s_defUpdate[512][3][3]; // Next v_i x del(w_ip)^T
-
 	float3 particlePosInWorld = make_float3(
 		particlePositions[i*3],
 		particlePositions[i*3 + 1],
 		particlePositions[i*3 + 2]
 	); // x_p
+	float (*particleF)[3] = (float(*)[3]) (particleDeformationGradients + i*9); // F_p
 
-	s_particleVelocity[threadIdx.x] = make_float3(0.0, 0.0, 0.0);
+	float3 particleVelocity = make_float3(0.0, 0.0, 0.0); // Next v_p
 
-	s_particleAffineState[threadIdx.x][0][0] = 0.0;
-	s_particleAffineState[threadIdx.x][0][1] = 0.0;
-	s_particleAffineState[threadIdx.x][0][2] = 0.0;
-	s_particleAffineState[threadIdx.x][1][0] = 0.0;
-	s_particleAffineState[threadIdx.x][1][1] = 0.0;
-	s_particleAffineState[threadIdx.x][1][2] = 0.0;
-	s_particleAffineState[threadIdx.x][2][0] = 0.0;
-	s_particleAffineState[threadIdx.x][2][1] = 0.0;
-	s_particleAffineState[threadIdx.x][2][2] = 0.0;
+	float particleAffineState[3][3]; // Next B_p
+	particleAffineState[0][0] = 0.0;
+	particleAffineState[0][1] = 0.0;
+	particleAffineState[0][2] = 0.0;
+	particleAffineState[1][0] = 0.0;
+	particleAffineState[1][1] = 0.0;
+	particleAffineState[1][2] = 0.0;
+	particleAffineState[2][0] = 0.0;
+	particleAffineState[2][1] = 0.0;
+	particleAffineState[2][2] = 0.0;
 
-	s_defUpdate[threadIdx.x][0][0] = 0.0;
-	s_defUpdate[threadIdx.x][0][1] = 0.0;
-	s_defUpdate[threadIdx.x][0][2] = 0.0;
-	s_defUpdate[threadIdx.x][1][0] = 0.0;
-	s_defUpdate[threadIdx.x][1][1] = 0.0;
-	s_defUpdate[threadIdx.x][1][2] = 0.0;
-	s_defUpdate[threadIdx.x][2][0] = 0.0;
-	s_defUpdate[threadIdx.x][2][1] = 0.0;
-	s_defUpdate[threadIdx.x][2][2] = 0.0;
+	float defUpdate[3][3]; // Next v_i x del(w_ip)^T
+	defUpdate[0][0] = 0.0;
+	defUpdate[0][1] = 0.0;
+	defUpdate[0][2] = 0.0;
+	defUpdate[1][0] = 0.0;
+	defUpdate[1][1] = 0.0;
+	defUpdate[1][2] = 0.0;
+	defUpdate[2][0] = 0.0;
+	defUpdate[2][1] = 0.0;
+	defUpdate[2][2] = 0.0;
 
 	for (int dx = -1; dx <= 1; dx++) {
 		for (int dy = -1; dy <= 1; dy++) {
@@ -1440,66 +1438,59 @@ extern "C" __global__ void G2P_GatherAPIC(
 				);
 
 				// Velocity (v_p)
-				s_particleVelocity[threadIdx.x] += weight * gridVelocity;
+				particleVelocity += weight * gridVelocity;
 
 				// Affine state (B_p)
-				s_particleAffineState[threadIdx.x][0][0] += weight * gridVelocity.x * positionDelta.x;
-				s_particleAffineState[threadIdx.x][0][1] += weight * gridVelocity.x * positionDelta.y;
-				s_particleAffineState[threadIdx.x][0][2] += weight * gridVelocity.x * positionDelta.z;
-				s_particleAffineState[threadIdx.x][1][0] += weight * gridVelocity.y * positionDelta.x;
-				s_particleAffineState[threadIdx.x][1][1] += weight * gridVelocity.y * positionDelta.y;
-				s_particleAffineState[threadIdx.x][1][2] += weight * gridVelocity.y * positionDelta.z;
-				s_particleAffineState[threadIdx.x][2][0] += weight * gridVelocity.z * positionDelta.x;
-				s_particleAffineState[threadIdx.x][2][1] += weight * gridVelocity.z * positionDelta.y;
-				s_particleAffineState[threadIdx.x][2][2] += weight * gridVelocity.z * positionDelta.z;
+				particleAffineState[0][0] += weight * gridVelocity.x * positionDelta.x;
+				particleAffineState[0][1] += weight * gridVelocity.x * positionDelta.y;
+				particleAffineState[0][2] += weight * gridVelocity.x * positionDelta.z;
+				particleAffineState[1][0] += weight * gridVelocity.y * positionDelta.x;
+				particleAffineState[1][1] += weight * gridVelocity.y * positionDelta.y;
+				particleAffineState[1][2] += weight * gridVelocity.y * positionDelta.z;
+				particleAffineState[2][0] += weight * gridVelocity.z * positionDelta.x;
+				particleAffineState[2][1] += weight * gridVelocity.z * positionDelta.y;
+				particleAffineState[2][2] += weight * gridVelocity.z * positionDelta.z;
 
 				// Deformation update (v_i x del(w_ip)^T)
-				s_defUpdate[threadIdx.x][0][0] += gridVelocity.x * weightGradient.x;
-				s_defUpdate[threadIdx.x][0][1] += gridVelocity.x * weightGradient.y;
-				s_defUpdate[threadIdx.x][0][2] += gridVelocity.x * weightGradient.z;
-				s_defUpdate[threadIdx.x][1][0] += gridVelocity.y * weightGradient.x;
-				s_defUpdate[threadIdx.x][1][1] += gridVelocity.y * weightGradient.y;
-				s_defUpdate[threadIdx.x][1][2] += gridVelocity.y * weightGradient.z;
-				s_defUpdate[threadIdx.x][2][0] += gridVelocity.z * weightGradient.x;
-				s_defUpdate[threadIdx.x][2][1] += gridVelocity.z * weightGradient.y;
-				s_defUpdate[threadIdx.x][2][2] += gridVelocity.z * weightGradient.z;
+				defUpdate[0][0] += gridVelocity.x * weightGradient.x;
+				defUpdate[0][1] += gridVelocity.x * weightGradient.y;
+				defUpdate[0][2] += gridVelocity.x * weightGradient.z;
+				defUpdate[1][0] += gridVelocity.y * weightGradient.x;
+				defUpdate[1][1] += gridVelocity.y * weightGradient.y;
+				defUpdate[1][2] += gridVelocity.y * weightGradient.z;
+				defUpdate[2][0] += gridVelocity.z * weightGradient.x;
+				defUpdate[2][1] += gridVelocity.z * weightGradient.y;
+				defUpdate[2][2] += gridVelocity.z * weightGradient.z;
 			}
 		}
 	}
 
 	// Update particle data from gathered values
 
-	particleVelocities[i*3] = s_particleVelocity[threadIdx.x].x;
-	particleVelocities[i*3 + 1] = s_particleVelocity[threadIdx.x].y;
-	particleVelocities[i*3 + 2] = s_particleVelocity[threadIdx.x].z;
+	particleVelocities[i*3] = particleVelocity.x;
+	particleVelocities[i*3 + 1] = particleVelocity.y;
+	particleVelocities[i*3 + 2] = particleVelocity.z;
 
-	// Advect particles
-	particlePositions[i*3] += deltaTime * s_particleVelocity[threadIdx.x].x * 100.0; // convert m/s to cm/s (grid units)
-	particlePositions[i*3 + 1] += deltaTime * s_particleVelocity[threadIdx.x].y * 100.0;
-	particlePositions[i*3 + 2] += deltaTime * s_particleVelocity[threadIdx.x].z * 100.0;
+	particleAffineStates[i*9] = particleAffineState[0][0];
+	particleAffineStates[i*9 + 1] = particleAffineState[0][1];
+	particleAffineStates[i*9 + 2] = particleAffineState[0][2];
+	particleAffineStates[i*9 + 3] = particleAffineState[1][0];
+	particleAffineStates[i*9 + 4] = particleAffineState[1][1];
+	particleAffineStates[i*9 + 5] = particleAffineState[1][2];
+	particleAffineStates[i*9 + 6] = particleAffineState[2][0];
+	particleAffineStates[i*9 + 7] = particleAffineState[2][1];
+	particleAffineStates[i*9 + 8] = particleAffineState[2][2];
 
-	particleAffineStates[i*9] = s_particleAffineState[threadIdx.x][0][0];
-	particleAffineStates[i*9 + 1] = s_particleAffineState[threadIdx.x][0][1];
-	particleAffineStates[i*9 + 2] = s_particleAffineState[threadIdx.x][0][2];
-	particleAffineStates[i*9 + 3] = s_particleAffineState[threadIdx.x][1][0];
-	particleAffineStates[i*9 + 4] = s_particleAffineState[threadIdx.x][1][1];
-	particleAffineStates[i*9 + 5] = s_particleAffineState[threadIdx.x][1][2];
-	particleAffineStates[i*9 + 6] = s_particleAffineState[threadIdx.x][2][0];
-	particleAffineStates[i*9 + 7] = s_particleAffineState[threadIdx.x][2][1];
-	particleAffineStates[i*9 + 8] = s_particleAffineState[threadIdx.x][2][2];
+	defUpdate[0][0] = deltaTime * defUpdate[0][0] + 1.0;
+	defUpdate[0][1] = deltaTime * defUpdate[0][1];
+	defUpdate[0][2] = deltaTime * defUpdate[0][2];
+	defUpdate[1][0] = deltaTime * defUpdate[1][0];
+	defUpdate[1][1] = deltaTime * defUpdate[1][1] + 1.0;
+	defUpdate[1][2] = deltaTime * defUpdate[1][2];
+	defUpdate[2][0] = deltaTime * defUpdate[2][0];
+	defUpdate[2][1] = deltaTime * defUpdate[2][1];
+	defUpdate[2][2] = deltaTime * defUpdate[2][2] + 1.0;
 
-	float defUpdate[3][3];
-	defUpdate[0][0] = deltaTime * s_defUpdate[threadIdx.x][0][0] + 1.0;
-	defUpdate[0][1] = deltaTime * s_defUpdate[threadIdx.x][0][1];
-	defUpdate[0][2] = deltaTime * s_defUpdate[threadIdx.x][0][2];
-	defUpdate[1][0] = deltaTime * s_defUpdate[threadIdx.x][1][0];
-	defUpdate[1][1] = deltaTime * s_defUpdate[threadIdx.x][1][1] + 1.0;
-	defUpdate[1][2] = deltaTime * s_defUpdate[threadIdx.x][1][2];
-	defUpdate[2][0] = deltaTime * s_defUpdate[threadIdx.x][2][0];
-	defUpdate[2][1] = deltaTime * s_defUpdate[threadIdx.x][2][1];
-	defUpdate[2][2] = deltaTime * s_defUpdate[threadIdx.x][2][2] + 1.0;
-
-	float (*particleF)[3] = (float(*)[3]) (particleDeformationGradients + i*9); // F_p
 	particleF[0][0] = defUpdate[0][0]*particleF[0][0] + defUpdate[0][1]*particleF[1][0] + defUpdate[0][2]*particleF[2][0];
 	particleF[0][1] = defUpdate[0][0]*particleF[0][1] + defUpdate[0][1]*particleF[1][1] + defUpdate[0][2]*particleF[2][1];
 	particleF[0][2] = defUpdate[0][0]*particleF[0][2] + defUpdate[0][1]*particleF[1][2] + defUpdate[0][2]*particleF[2][2];
@@ -1509,6 +1500,25 @@ extern "C" __global__ void G2P_GatherAPIC(
 	particleF[2][0] = defUpdate[2][0]*particleF[0][0] + defUpdate[2][1]*particleF[1][0] + defUpdate[2][2]*particleF[2][0];
 	particleF[2][1] = defUpdate[2][0]*particleF[0][1] + defUpdate[2][1]*particleF[1][1] + defUpdate[2][2]*particleF[2][1];
 	particleF[2][2] = defUpdate[2][0]*particleF[0][2] + defUpdate[2][1]*particleF[1][2] + defUpdate[2][2]*particleF[2][2];
+
+	// Advect particles
+	particlePositions[i*3] += deltaTime * particleVelocity.x * 100.0; // convert m/s to cm/s (grid units)
+	particlePositions[i*3 + 1] += deltaTime * particleVelocity.y * 100.0;
+	particlePositions[i*3 + 2] += deltaTime * particleVelocity.z * 100.0;
+
+	/*if (i == 0) { // DEBUG
+		printf(
+			"xp: %f %f %f, vp: %f %f %f\nF: %f %f %f / %f %f %f / %f %f %f\nB: %f %f %f / %f %f %f / %f %f %f\n",
+			particlePositions[i*3], particlePositions[i*3 + 1], particlePositions[i*3 + 2],
+			particleVelocity.x, particleVelocity.y, particleVelocity.z,
+			particleF[0][0], particleF[0][1], particleF[0][2],
+			particleF[1][0], particleF[1][1], particleF[1][2],
+			particleF[2][0], particleF[2][1], particleF[2][2],
+			particleAffineState[0][0], particleAffineState[0][1], particleAffineState[0][2],
+			particleAffineState[1][0], particleAffineState[1][1], particleAffineState[1][2],
+			particleAffineState[2][0], particleAffineState[2][1], particleAffineState[2][2]
+		);
+	}*/
 }
 
 extern "C" __global__ void gvdbAddSupportVoxel (VDBInfo* gvdb, int num_pnts,  float radius, float offset, float amp,
