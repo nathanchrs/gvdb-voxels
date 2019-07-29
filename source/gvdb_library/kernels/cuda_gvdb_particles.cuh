@@ -1073,8 +1073,8 @@ inline __device__ void fixedCorotatedConstitutiveModel(float(*F)[3], float(*P)[3
 }
 
 inline __device__ void P2G_APIC(
-	int num_pnts, int i, float3 positionDelta, float particleMass, float3 particleVelocity,
-	float *particleMinVoxPxFTs, float *particleAffineStates, float *result
+	float3 positionDelta, float particleMass, float3 particleVelocity,
+	float (*particleMinVoxPxFT)[3], float (*particleB)[3], float *result
 ) {
 	// Assumes cellDimension is 1.0 cm, converted from cm (grid units) to m
 	// w_ip and gradient of w_ip
@@ -1087,9 +1087,9 @@ inline __device__ void P2G_APIC(
 
 	// Cell momentum (m_i * v_i)
 	float onePerD = 4e4; // 1/D = 4 /cellDimension^2 / 4 (special case for quadratic weight kernel), converted from cm (grid units) to m
-	result[1] = onePerD * (particleAffineStates[i]*positionDelta.x + particleAffineStates[num_pnts + i]*positionDelta.y + particleAffineStates[2*num_pnts + i]*positionDelta.z);
-	result[2] = onePerD * (particleAffineStates[3*num_pnts + i]*positionDelta.x + particleAffineStates[4*num_pnts + i]*positionDelta.y + particleAffineStates[5*num_pnts + i]*positionDelta.z);
-	result[3] = onePerD * (particleAffineStates[6*num_pnts + i]*positionDelta.x + particleAffineStates[7*num_pnts + i]*positionDelta.y + particleAffineStates[8*num_pnts + i]*positionDelta.z);
+	result[1] = onePerD * (particleB[0][0]*positionDelta.x + particleB[0][1]*positionDelta.y + particleB[0][2]*positionDelta.z);
+	result[2] = onePerD * (particleB[1][0]*positionDelta.x + particleB[1][1]*positionDelta.y + particleB[1][2]*positionDelta.z);
+	result[3] = onePerD * (particleB[2][0]*positionDelta.x + particleB[2][1]*positionDelta.y + particleB[2][2]*positionDelta.z);
 	result[1] += particleVelocity.x;
 	result[2] += particleVelocity.y;
 	result[3] += particleVelocity.z;
@@ -1098,9 +1098,9 @@ inline __device__ void P2G_APIC(
 	result[3] *= result[0];
 
 	// Cell force (f_i)
-	result[4] = particleMinVoxPxFTs[i]*weightGradient.x + particleMinVoxPxFTs[num_pnts + i]*weightGradient.y + particleMinVoxPxFTs[2*num_pnts + i]*weightGradient.z;
-	result[5] = particleMinVoxPxFTs[3*num_pnts + i]*weightGradient.x + particleMinVoxPxFTs[4*num_pnts + i]*weightGradient.y + particleMinVoxPxFTs[5*num_pnts + i]*weightGradient.z;
-	result[6] = particleMinVoxPxFTs[6*num_pnts + i]*weightGradient.x + particleMinVoxPxFTs[7*num_pnts + i]*weightGradient.y + particleMinVoxPxFTs[8*num_pnts + i]*weightGradient.z;
+	result[4] = particleMinVoxPxFT[0][0]*weightGradient.x + particleMinVoxPxFT[0][1]*weightGradient.y + particleMinVoxPxFT[0][2]*weightGradient.z;
+	result[5] = particleMinVoxPxFT[1][0]*weightGradient.x + particleMinVoxPxFT[1][1]*weightGradient.y + particleMinVoxPxFT[1][2]*weightGradient.z;
+	result[6] = particleMinVoxPxFT[2][0]*weightGradient.x + particleMinVoxPxFT[2][1]*weightGradient.y + particleMinVoxPxFT[2][2]*weightGradient.z;
 }
 
 extern "C" __global__ void MPM_CalculateConstitutiveModel(
@@ -1110,18 +1110,8 @@ extern "C" __global__ void MPM_CalculateConstitutiveModel(
 	uint i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= num_pnts) return;
 
-	__shared__ float s_particleF[512][3][3]; // F_p
-	float (*particleF)[3] = (float(*)[3]) &s_particleF[threadIdx.x];
-
-	particleF[0][0] = particleDeformationGradients[i];
-	particleF[0][1] = particleDeformationGradients[1*num_pnts + i];
-	particleF[0][2] = particleDeformationGradients[2*num_pnts + i];
-	particleF[1][0] = particleDeformationGradients[3*num_pnts + i];
-	particleF[1][1] = particleDeformationGradients[4*num_pnts + i];
-	particleF[1][2] = particleDeformationGradients[5*num_pnts + i];
-	particleF[2][0] = particleDeformationGradients[6*num_pnts + i];
-	particleF[2][1] = particleDeformationGradients[7*num_pnts + i];
-	particleF[2][2] = particleDeformationGradients[8*num_pnts + i];
+	float (*particleF)[3] = (float(*)[3]) (particleDeformationGradients + i*9); // F_p
+	float (*particleMinVoxPxFT)[3] = (float(*)[3]) (particleMinVoxPxFTs + i*9); // -Vo x P x transpose(F_p)
 
 	// Cell force (f_i)
 	float P[3][3]; // First Piola-Kirchoff stress tensor (P)
@@ -1136,17 +1126,15 @@ extern "C" __global__ void MPM_CalculateConstitutiveModel(
 	PxFT[2][0] = P[2][0]*particleF[0][0] + P[2][1]*particleF[0][1] + P[2][2]*particleF[0][2];
 	PxFT[2][1] = P[2][0]*particleF[1][0] + P[2][1]*particleF[1][1] + P[2][2]*particleF[1][2];
 	PxFT[2][2] = P[2][0]*particleF[2][0] + P[2][1]*particleF[2][1] + P[2][2]*particleF[2][2];
-
-	// -Vo x P x transpose(F_p)
-	particleMinVoxPxFTs[i] = -particleInitialVolume * PxFT[0][0];
-	particleMinVoxPxFTs[1*num_pnts + i] = -particleInitialVolume * PxFT[0][1];
-	particleMinVoxPxFTs[2*num_pnts + i] = -particleInitialVolume * PxFT[0][2];
-	particleMinVoxPxFTs[3*num_pnts + i] = -particleInitialVolume * PxFT[1][0];
-	particleMinVoxPxFTs[4*num_pnts + i] = -particleInitialVolume * PxFT[1][1];
-	particleMinVoxPxFTs[5*num_pnts + i] = -particleInitialVolume * PxFT[1][2];
-	particleMinVoxPxFTs[6*num_pnts + i] = -particleInitialVolume * PxFT[2][0];
-	particleMinVoxPxFTs[7*num_pnts + i] = -particleInitialVolume * PxFT[2][1];
-	particleMinVoxPxFTs[8*num_pnts + i] = -particleInitialVolume * PxFT[2][2];
+	particleMinVoxPxFT[0][0] = -particleInitialVolume * PxFT[0][0];
+	particleMinVoxPxFT[0][1] = -particleInitialVolume * PxFT[0][1];
+	particleMinVoxPxFT[0][2] = -particleInitialVolume * PxFT[0][2];
+	particleMinVoxPxFT[1][0] = -particleInitialVolume * PxFT[1][0];
+	particleMinVoxPxFT[1][1] = -particleInitialVolume * PxFT[1][1];
+	particleMinVoxPxFT[1][2] = -particleInitialVolume * PxFT[1][2];
+	particleMinVoxPxFT[2][0] = -particleInitialVolume * PxFT[2][0];
+	particleMinVoxPxFT[2][1] = -particleInitialVolume * PxFT[2][1];
+	particleMinVoxPxFT[2][2] = -particleInitialVolume * PxFT[2][2];
 }
 
 extern "C" __global__ void P2G_ScatterAPIC(
@@ -1169,6 +1157,8 @@ extern "C" __global__ void P2G_ScatterAPIC(
 		particleVelocities[i*3 + 1],
 		particleVelocities[i*3 + 2]
 	); // v_p
+	float (*particleMinVoxPxFT)[3] = (float(*)[3]) (particleMinVoxPxFTs + i*9); // -Vo x P x transpose(F_p)
+	float (*particleB)[3] = (float(*)[3]) (particleAffineStates + i*9); // B_p
 
 	#pragma unroll
 	for (int dx = -1; dx <= 1; dx++) {
@@ -1195,8 +1185,8 @@ extern "C" __global__ void P2G_ScatterAPIC(
 
 				float valuesToScatter[7];
 				P2G_APIC(
-					num_pnts, i, positionDelta, particleMass, particleVelocity,
-					particleMinVoxPxFTs, particleAffineStates, valuesToScatter
+					positionDelta, particleMass, particleVelocity,
+					particleMinVoxPxFT, particleB, valuesToScatter
 				);
 
 				unsigned long int atlasIndex = cellIndexInAtlas.z * atlasSize.x * atlasSize.y +
@@ -1230,7 +1220,8 @@ extern "C" __global__ void P2G_ScatterReduceAPIC(
 	float3 particlePosInWorld;
 	float particleMass;
 	float3 particleVelocity;
-	int i;
+	float (*particleMinVoxPxFT)[3];
+	float (*particleB)[3];
 
 	uint laneIndex = threadIdx.x & 0x1f;
 	bool isCurrentThreadActive = false;
@@ -1256,7 +1247,7 @@ extern "C" __global__ void P2G_ScatterReduceAPIC(
 	if (threadIdx.x < particleCountInCurrentBlock) { // Thread is assigned to a particle
 		// Load particle data and mark active threads
 		uint particleIndex = blockParticleOffset + threadIdx.x;
-		i = sortedParticleIndex[particleIndex];
+		int i = sortedParticleIndex[particleIndex];
 		particlePosInWorld = make_float3(
 			particlePositions[i*3],
 			particlePositions[i*3 + 1],
@@ -1268,6 +1259,8 @@ extern "C" __global__ void P2G_ScatterReduceAPIC(
 			particleVelocities[i*3 + 1],
 			particleVelocities[i*3 + 2]
 		); // v_p
+		particleMinVoxPxFT = (float(*)[3]) (particleMinVoxPxFTs + i*9); // -Vo x P x transpose(F_p)
+		particleB = (float(*)[3]) (particleAffineStates + i*9); // B_p
 
 		isCurrentThreadActive = true;
 		isCurrentThreadFirstInCell = particleCellFlag[particleIndex];
@@ -1326,8 +1319,8 @@ extern "C" __global__ void P2G_ScatterReduceAPIC(
 
 					float valuesToScatter[7];
 					P2G_APIC(
-						num_pnts, i, positionDelta, particleMass, particleVelocity,
-						particleMinVoxPxFTs, particleAffineStates, valuesToScatter
+						positionDelta, particleMass, particleVelocity,
+						particleMinVoxPxFT, particleB, valuesToScatter
 					);
 
 					uint shuffleDestinationMask = (cellFlagMask ^ activeThreadsMask) >> 1;
@@ -1412,6 +1405,7 @@ extern "C" __global__ void G2P_GatherAPIC(
 		particlePositions[i*3 + 1],
 		particlePositions[i*3 + 2]
 	); // x_p
+	float (*particleF)[3] = (float(*)[3]) (particleDeformationGradients + i*9); // F_p
 
 	float3 particleVelocity = make_float3(0.0, 0.0, 0.0); // Next v_p
 
@@ -1509,15 +1503,15 @@ extern "C" __global__ void G2P_GatherAPIC(
 	particleVelocities[i*3 + 1] = particleVelocity.y;
 	particleVelocities[i*3 + 2] = particleVelocity.z;
 
-	particleAffineStates[i] = particleAffineState[0][0];
-	particleAffineStates[1*num_pnts + i] = particleAffineState[0][1];
-	particleAffineStates[2*num_pnts + i] = particleAffineState[0][2];
-	particleAffineStates[3*num_pnts + i] = particleAffineState[1][0];
-	particleAffineStates[4*num_pnts + i] = particleAffineState[1][1];
-	particleAffineStates[5*num_pnts + i] = particleAffineState[1][2];
-	particleAffineStates[6*num_pnts + i] = particleAffineState[2][0];
-	particleAffineStates[7*num_pnts + i] = particleAffineState[2][1];
-	particleAffineStates[8*num_pnts + i] = particleAffineState[2][2];
+	particleAffineStates[i*9] = particleAffineState[0][0];
+	particleAffineStates[i*9 + 1] = particleAffineState[0][1];
+	particleAffineStates[i*9 + 2] = particleAffineState[0][2];
+	particleAffineStates[i*9 + 3] = particleAffineState[1][0];
+	particleAffineStates[i*9 + 4] = particleAffineState[1][1];
+	particleAffineStates[i*9 + 5] = particleAffineState[1][2];
+	particleAffineStates[i*9 + 6] = particleAffineState[2][0];
+	particleAffineStates[i*9 + 7] = particleAffineState[2][1];
+	particleAffineStates[i*9 + 8] = particleAffineState[2][2];
 
 	defUpdate[0][0] = deltaTime * defUpdate[0][0] + 1.0;
 	defUpdate[0][1] = deltaTime * defUpdate[0][1];
@@ -1529,27 +1523,15 @@ extern "C" __global__ void G2P_GatherAPIC(
 	defUpdate[2][1] = deltaTime * defUpdate[2][1];
 	defUpdate[2][2] = deltaTime * defUpdate[2][2] + 1.0;
 
-	__shared__ float s_particleF[512][3][3]; // F_p
-	float (*particleF)[3] = (float(*)[3]) &s_particleF[threadIdx.x];
-	particleF[0][0] = particleDeformationGradients[i];
-	particleF[0][1] = particleDeformationGradients[1*num_pnts + i];
-	particleF[0][2] = particleDeformationGradients[2*num_pnts + i];
-	particleF[1][0] = particleDeformationGradients[3*num_pnts + i];
-	particleF[1][1] = particleDeformationGradients[4*num_pnts + i];
-	particleF[1][2] = particleDeformationGradients[5*num_pnts + i];
-	particleF[2][0] = particleDeformationGradients[6*num_pnts + i];
-	particleF[2][1] = particleDeformationGradients[7*num_pnts + i];
-	particleF[2][2] = particleDeformationGradients[8*num_pnts + i];
-
-	particleDeformationGradients[i] = defUpdate[0][0]*particleF[0][0] + defUpdate[0][1]*particleF[1][0] + defUpdate[0][2]*particleF[2][0];
-	particleDeformationGradients[1*num_pnts + i] = defUpdate[0][0]*particleF[0][1] + defUpdate[0][1]*particleF[1][1] + defUpdate[0][2]*particleF[2][1];
-	particleDeformationGradients[2*num_pnts + i] = defUpdate[0][0]*particleF[0][2] + defUpdate[0][1]*particleF[1][2] + defUpdate[0][2]*particleF[2][2];
-	particleDeformationGradients[3*num_pnts + i] = defUpdate[1][0]*particleF[0][0] + defUpdate[1][1]*particleF[1][0] + defUpdate[1][2]*particleF[2][0];
-	particleDeformationGradients[4*num_pnts + i] = defUpdate[1][0]*particleF[0][1] + defUpdate[1][1]*particleF[1][1] + defUpdate[1][2]*particleF[2][1];
-	particleDeformationGradients[5*num_pnts + i] = defUpdate[1][0]*particleF[0][2] + defUpdate[1][1]*particleF[1][2] + defUpdate[1][2]*particleF[2][2];
-	particleDeformationGradients[6*num_pnts + i] = defUpdate[2][0]*particleF[0][0] + defUpdate[2][1]*particleF[1][0] + defUpdate[2][2]*particleF[2][0];
-	particleDeformationGradients[7*num_pnts + i] = defUpdate[2][0]*particleF[0][1] + defUpdate[2][1]*particleF[1][1] + defUpdate[2][2]*particleF[2][1];
-	particleDeformationGradients[8*num_pnts + i] = defUpdate[2][0]*particleF[0][2] + defUpdate[2][1]*particleF[1][2] + defUpdate[2][2]*particleF[2][2];
+	particleF[0][0] = defUpdate[0][0]*particleF[0][0] + defUpdate[0][1]*particleF[1][0] + defUpdate[0][2]*particleF[2][0];
+	particleF[0][1] = defUpdate[0][0]*particleF[0][1] + defUpdate[0][1]*particleF[1][1] + defUpdate[0][2]*particleF[2][1];
+	particleF[0][2] = defUpdate[0][0]*particleF[0][2] + defUpdate[0][1]*particleF[1][2] + defUpdate[0][2]*particleF[2][2];
+	particleF[1][0] = defUpdate[1][0]*particleF[0][0] + defUpdate[1][1]*particleF[1][0] + defUpdate[1][2]*particleF[2][0];
+	particleF[1][1] = defUpdate[1][0]*particleF[0][1] + defUpdate[1][1]*particleF[1][1] + defUpdate[1][2]*particleF[2][1];
+	particleF[1][2] = defUpdate[1][0]*particleF[0][2] + defUpdate[1][1]*particleF[1][2] + defUpdate[1][2]*particleF[2][2];
+	particleF[2][0] = defUpdate[2][0]*particleF[0][0] + defUpdate[2][1]*particleF[1][0] + defUpdate[2][2]*particleF[2][0];
+	particleF[2][1] = defUpdate[2][0]*particleF[0][1] + defUpdate[2][1]*particleF[1][1] + defUpdate[2][2]*particleF[2][1];
+	particleF[2][2] = defUpdate[2][0]*particleF[0][2] + defUpdate[2][1]*particleF[1][2] + defUpdate[2][2]*particleF[2][2];
 
 	// Advect particles
 	particlePositions[i*3] += deltaTime * particleVelocity.x * 100.0; // convert m/s to cm/s (grid units)
@@ -1899,13 +1881,15 @@ extern "C" __global__ void P2G_GatherAPIC(
 			particleVelocities[i*3 + 1],
 			particleVelocities[i*3 + 2]
 		); // v_p
+		float (*particleMinVoxPxFT)[3] = (float(*)[3]) (particleMinVoxPxFTs + i*9); // -Vo x P x transpose(F_p)
+		float (*particleB)[3] = (float(*)[3]) (particleAffineStates + i*9); // B_p
 
 		float3 positionDelta = (make_float3(wpos) - particlePosInWorld) / 100.0; // x_i - x_p, converted from cm (grid units) to m
 
 		float result[7];
 		P2G_APIC(
-			num_pnts, i, positionDelta, particleMass, particleVelocity,
-			particleMinVoxPxFTs, particleAffineStates, result
+			positionDelta, particleMass, particleVelocity,
+			particleMinVoxPxFT, particleB, result
 		);
 		gatheredValues[0] += result[0];
 		gatheredValues[1] += result[1];
@@ -1929,15 +1913,16 @@ extern "C" __global__ void P2G_GatherAPIC(
 }
 
 extern "C" __global__ void gvdbCheckVal (VDBInfo* gvdb, float slice, int3 res, int chanVx, int chanVy, int chanVz, int chanVxOld, int chanVyOld, int chanVzOld, float* outbuf1, float* outbuf2 )
+												 
 {
 	uint3 vox = blockIdx * make_uint3(blockDim.x, blockDim.y, blockDim.z) + threadIdx;
 	if ( vox.y >= 1  ) return;
 	if ( vox.x > res.x || vox.z > res.z ) return;
 
-	float3 wpos = make_float3(vox) * 0.5;
+	float3 wpos = make_float3(vox) * 0.5;	
 	wpos.y = slice;
 
-	float3 vmin, vdel;
+	float3 vmin, vdel;										
 	VDBNode* node = getleafNodeAtPoint ( gvdb, wpos, &vmin, &vdel);
 	float3 p = (wpos - vmin) / vdel;
 	if ( node == 0x0 ) return; 
